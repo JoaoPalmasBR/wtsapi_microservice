@@ -13,9 +13,9 @@ jobs:
       - name: Deploy WTSAPI Microservice
         uses: appleboy/ssh-action@v0.1.6
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PASSWORD }}
           script: |
             cd /root/deploy/rocketsend/wtsapi_microservice
             export NODE_ENV=production
@@ -41,9 +41,9 @@ jobs:
       - name: Upate project with git
         uses: appleboy/ssh-action@v0.1.6
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_KEY }}
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PASSWORD }}
           script: |
             cd /root/deploy/rocketsend/wtsapi_microservice
             git pull origin main
