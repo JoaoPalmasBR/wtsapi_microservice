@@ -1,5 +1,7 @@
 import axios from "axios";
 import qrcode from "qrcode-terminal";
+import { Socket } from "socket.io-client";
+import { io as WebSocket } from "socket.io-client";
 
 import { Connection, ConsumerProps } from "rabbitmq-client";
 import { LocalAuth, Client as WhatsApp } from "whatsapp-web.js";
@@ -24,26 +26,31 @@ interface WtsAPISession extends WhatsApp, SessionExternalProps {}
 class WtsAPISessionManager {
   private rabbit: Connection;
   private sessions: WtsAPISession[] = [];
-  private socket = new WebSocket(
-    process.env.WEB_SOCKET_URL ?? "ws://localhost:8080"
-  );
+  private socket: Socket = WebSocket("ws://localhost:3007", {
+    transports: ["websocket"],
+  });
 
   constructor() {
     this.rabbit = new Connection(
       process.env.RABBITMQ_HOST ?? "amqp://guest:guest@localhost:5672"
     );
 
+    this.rabbit.on("connection", () => {
+      console.log(
+        "WTSAPI: WhatsApp Worker connection successfully (re)established"
+      );
+    });
+
+    this.socket.on("connect", () => {
+      console.log(
+        "WTSAPI: WhatsApp provider Socket connected:",
+        this.socket.id
+      );
+    });
+
     this.rabbit.on("error", (err) => {
       console.log("WTSAPI: RabbitMQ connection error", err);
     });
-
-    this.rabbit.on("connection", () => {
-      console.log("WTSAPI: Connection successfully (re)established");
-    });
-
-    this.socket.onopen = () => {
-      console.log("WTSAPI: WebSocket connected!");
-    };
 
     this.onInit();
   }
@@ -66,10 +73,8 @@ class WtsAPISessionManager {
     console.log("WTSAPI: Starting session:", data.token);
 
     const whatsapp = new WhatsApp({
-      authStrategy: new LocalAuth({
-        clientId: data.token,
-        // dataPath: `./sessions/${data.client_id}`,
-      }),
+      authStrategy: new LocalAuth({ clientId: data.token }),
+      qrMaxRetries: 4,
       puppeteer: {
         headless: true,
         args: [
@@ -83,18 +88,20 @@ class WtsAPISessionManager {
     });
 
     whatsapp.on("qr", (qr) => {
-      qrcode.generate(qr, { small: true });
+      // qrcode.generate(qr, { small: true });
 
-      this.socket.send(
-        JSON.stringify({
-          event: "qr",
-          data: {
-            client_id: data.client_id,
-            token: data.token,
-            qr: qr,
-          },
-        })
+      console.log(
+        `WTSAPI: QR Code generated for ${
+          data.token
+        } - ${new Date().toLocaleTimeString()}`
       );
+
+      this.socket.emit("INTERNAL:qr_code", {
+        clientId: data.client_id,
+        data: {
+          qr: qr,
+        },
+      });
     });
 
     whatsapp.on("ready", async () => {

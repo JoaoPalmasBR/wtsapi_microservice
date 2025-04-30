@@ -1,0 +1,51 @@
+name: WTSAPI Microservice Deploy - CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    needs: update_files_and_packages
+    steps:
+      - name: Deploy WTSAPI Microservice
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /root/deploy/rocketsend/wtsapi_microservice
+            export NODE_ENV=production
+            export RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
+            export EMAIL_HOST=${{ secrets.EMAIL_HOST }}
+            export EMAIL_PORT=${{ secrets.EMAIL_PORT }}
+            export EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
+            export EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
+            yarn build
+            pm2 restart ecosystem.config.js
+            pm2 save
+
+  update_files_and_packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "22"
+      - name: Upate project with git
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd /root/deploy/rocketsend/wtsapi_microservice
+            git pull origin main
+            rm -rf node_modules/
+            yarn

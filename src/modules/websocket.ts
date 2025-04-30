@@ -1,32 +1,32 @@
-import { WebSocketServer } from "ws";
+import { Server } from "socket.io";
 
-const server = new WebSocketServer({
-  port: 8080,
-  perMessageDeflate: {
-    zlibDeflateOptions: {
-      // See zlib defaults.
-      chunkSize: 1024,
-      memLevel: 7,
-      level: 3,
-    },
-    zlibInflateOptions: {
-      chunkSize: 10 * 1024,
-    },
-    // Other options settable:
-    clientNoContextTakeover: true, // Defaults to negotiated value.
-    serverNoContextTakeover: true, // Defaults to negotiated value.
-    serverMaxWindowBits: 10, // Defaults to negotiated value.
-    // Below options specified as default values.
-    concurrencyLimit: 10, // Limits zlib concurrency for perf.
-    threshold: 1024, // Size (in bytes) below which messages
-    // should not be compressed if context takeover is disabled.
-  },
+interface PayloadProps {
+  event: string;
+  data: {};
+}
+
+const io = new Server({
+  cors: { origin: "*" },
 });
 
-server.on("connection", (socket) => {
-  socket.on("message", (message) => {
-    server.emit("WTSAPI:wts_qrcode", message);
+io.on("connection", (socket) => {
+  console.log("WTSAPI: Socket started:", socket.id);
+
+  socket.on("INTERNAL:qr_code", (payload: PayloadProps) => {
+    console.log("WTSAPI: Received qrcode event, re-emitting to all clients");
+
+    io.emit("WTSAPI:wts_qrcode", payload);
+  });
+
+  socket.on("connect", () => {
+    console.log("WTSAPI: Socket connected:", socket.id);
+  });
+
+  socket.on("disconnect", () => {
+    console.log("WTSAPI: Socket disconnected:", socket.id);
   });
 });
 
-console.log("WTSAPI: WebSocket Server running in ws://localhost:8080");
+console.log("WTSAPI: Socket server listening on port 8080");
+
+io.listen(3007);
