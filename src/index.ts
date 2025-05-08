@@ -1,8 +1,9 @@
-import "./modules/websocket";
-
 import dotenv from "dotenv";
 
 dotenv.config();
 
-import "./modules/whatsapp";
+import "./modules/websocket";
+
 import "./modules/emails";
+import "./modules/whatsapp";
+import "./modules/notifications";

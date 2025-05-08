@@ -1,21 +1,22 @@
 import { Server } from "socket.io";
 
-interface PayloadProps {
-  event: string;
-  data: {};
-}
-
-const io = new Server({
-  cors: { origin: "*" },
-});
+const io = new Server({ cors: { origin: "*" } });
 
 io.on("connection", (socket) => {
   console.log("WTSAPI: Socket started:", socket.id);
 
-  socket.on("INTERNAL:qr_code", (payload: PayloadProps) => {
+  socket.on("INTERNAL:qr_code", (payload) => {
     console.log("WTSAPI: Received qrcode event, re-emitting to all clients");
 
     io.emit("WTSAPI:wts_qrcode", payload);
+  });
+
+  socket.on("INTERNAL:notification-web", (payload) => {
+    console.log(
+      "WTSAPI: Received notification-web event, re-emitting to all clients"
+    );
+    
+    io.emit("WTSAPI:notification-to-front", payload);
   });
 
   socket.on("connect", () => {
@@ -27,6 +28,10 @@ io.on("connection", (socket) => {
   });
 });
 
-console.log("WTSAPI: Socket server listening on port 8080");
+console.log(
+  `WTSAPI: Socket server listening on port ${
+    process.env.WEBSOCKET_PORT ?? 3007
+  }`
+);
 
-io.listen(3007);
+io.listen(Number(process.env.WEBSOCKET_PORT) ?? 3007);

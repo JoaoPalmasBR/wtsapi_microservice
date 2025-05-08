@@ -1,5 +1,3 @@
-import axios from "axios";
-import qrcode from "qrcode-terminal";
 import { Socket } from "socket.io-client";
 import { io as WebSocket } from "socket.io-client";
 
@@ -26,9 +24,12 @@ interface WtsAPISession extends WhatsApp, SessionExternalProps {}
 class WtsAPISessionManager {
   private rabbit: Connection;
   private sessions: WtsAPISession[] = [];
-  private socket: Socket = WebSocket("ws://localhost:3007", {
-    transports: ["websocket"],
-  });
+  private socket: Socket = WebSocket(
+    `ws://localhost:${Number(process.env.WEBSOCKET_PORT || "3007")}`,
+    {
+      transports: ["websocket"],
+    }
+  );
 
   constructor() {
     this.rabbit = new Connection(
@@ -37,19 +38,19 @@ class WtsAPISessionManager {
 
     this.rabbit.on("connection", () => {
       console.log(
-        "WTSAPI: WhatsApp Worker connection successfully (re)established"
+        "WTS_SERVICE: WhatsApp Worker connection successfully (re)established"
       );
     });
 
     this.socket.on("connect", () => {
       console.log(
-        "WTSAPI: WhatsApp provider Socket connected:",
+        "WTS_SERVICE: WhatsApp provider Socket connected:",
         this.socket.id
       );
     });
 
     this.rabbit.on("error", (err) => {
-      console.log("WTSAPI: RabbitMQ connection error", err);
+      console.log("WTS_SERVICE: RabbitMQ connection error", err);
     });
 
     this.onInit();
@@ -63,14 +64,14 @@ class WtsAPISessionManager {
     });
 
     sub.on("error", (err) => {
-      console.log("WTSAPI: consumer error (user-events)", err);
+      console.log("WTS_SERVICE: consumer error (user-events)", err);
     });
 
-    console.log("WTSAPI: WhatsApp Worker Session running...");
+    console.log("WTS_SERVICE: WhatsApp Worker Session running...");
   }
 
   private async onSessionStart(data: SessionExternalProps) {
-    console.log("WTSAPI: Starting session:", data.token);
+    console.log("WTS_SERVICE: Starting session:", data.token);
 
     const whatsapp = new WhatsApp({
       authStrategy: new LocalAuth({ clientId: data.token }),
@@ -91,7 +92,7 @@ class WtsAPISessionManager {
       // qrcode.generate(qr, { small: true });
 
       console.log(
-        `WTSAPI: QR Code generated for ${
+        `WTS_SERVICE: QR Code generated for ${
           data.token
         } - ${new Date().toLocaleTimeString()}`
       );
@@ -105,7 +106,7 @@ class WtsAPISessionManager {
     });
 
     whatsapp.on("ready", async () => {
-      console.log("WTSAPI: Session ready:", data.token);
+      console.log("WTS_SERVICE: Session ready:", data.token);
 
       const subMessage = this.rabbit.createConsumer(
         {
@@ -121,14 +122,14 @@ class WtsAPISessionManager {
       );
 
       subMessage.on("error", (err) => {
-        console.log("WTSAPI: consumer error (send-message)", err);
+        console.log("WTS_SERVICE: consumer error (send-message)", err);
       });
 
-      console.log("WTSAPI: Message consumer started:", data.token);
+      console.log("WTS_SERVICE: Message consumer started:", data.token);
     });
 
     whatsapp.on("authenticated", async (session) => {
-      console.log("WTSAPI: Session authenticated:", data.token);
+      console.log("WTS_SERVICE: Session authenticated:", data.token);
 
       const _newSession: WtsAPISession = Object.assign(whatsapp, {
         name: data.name,
@@ -146,7 +147,7 @@ class WtsAPISessionManager {
     });
 
     whatsapp.on("auth_failure", async (msg) => {
-      console.log("WTSAPI: Auth failure:", msg);
+      console.log("WTS_SERVICE: Auth failure:", msg);
 
       // await axios.post(data.webhook, {
       //   status: "auth_failure",
@@ -155,7 +156,7 @@ class WtsAPISessionManager {
     });
 
     whatsapp.on("disconnected", async (reason) => {
-      console.log("WTSAPI: Session disconnected:", reason);
+      console.log("WTS_SERVICE: Session disconnected:", reason);
 
       // await axios.post(data.webhook, {
       //   status: "disconnected",
@@ -170,7 +171,7 @@ class WtsAPISessionManager {
 
     await whatsapp.initialize();
 
-    console.log("WTSAPI: Session initialized:", data.token);
+    console.log("WTS_SERVICE: Session initialized:", data.token);
   }
 }
 
