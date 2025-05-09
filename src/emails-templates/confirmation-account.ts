@@ -58,7 +58,7 @@ export const templateConfirmationAccount = (email: string, token: string): strin
             color: rgb(0, 0, 0);
           "
         >
-          Bem vindo a RocketSend!
+          Bem vindo a Blibsend!
         </p>
         <p
           style="
@@ -84,7 +84,7 @@ export const templateConfirmationAccount = (email: string, token: string): strin
             <tr>
               <td>
                 <a
-                  href="https://rocketsend.click/auth/confirmation?token=${token}"
+                  href="https://blibsend.click/auth/confirmation?token=${token}"
                   style="
                     color: rgb(255, 255, 255);
                     text-decoration: none;

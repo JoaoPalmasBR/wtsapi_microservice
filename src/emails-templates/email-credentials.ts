@@ -78,7 +78,7 @@ export const emailCredentials = (
       <p>Se precisar de ajuda, entre em contato com nosso suporte.</p>
     </div>
     <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} RocketSend. Todos os direitos reservados.</p>
+      <p>&copy; ${new Date().getFullYear()} BlibSend. Todos os direitos reservados.</p>
     </div>
   </div>
 </body>

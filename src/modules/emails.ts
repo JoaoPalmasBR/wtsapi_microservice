@@ -70,8 +70,8 @@ class EmailsProcessor {
           await emailTransporter
             .sendMail({
               to: data.to,
-              subject: "Rocketsend - Confirmação de conta",
-              from: `Cube <${process.env.EMAIL_HOST_USER}>`,
+              subject: "Blibsend - Confirmação de conta",
+              from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
               html: templateConfirmationAccount(
                 data.to,
                 data.verification_code
@@ -96,8 +96,8 @@ class EmailsProcessor {
           await emailTransporter
             .sendMail({
               to: dataLoginUrl.to,
-              subject: "Rocketsend - Link de acesso",
-              from: `Cube <${process.env.EMAIL_HOST_USER}>`,
+              subject: "Blibsend - Link de acesso",
+              from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
               html: loginWithEmailTemplate(dataLoginUrl.url, dataLoginUrl.to),
             })
             .catch((err) => {
@@ -120,8 +120,8 @@ class EmailsProcessor {
           await emailTransporter
             .sendMail({
               to: dataCredentials.to,
-              subject: "Rocketsend - Credenciais de acesso",
-              from: `Cube <${process.env.EMAIL_HOST_USER}>`,
+              subject: "Blibsend - Credenciais de acesso",
+              from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
               html: emailCredentials(
                 dataCredentials.name,
                 dataCredentials.client_id,

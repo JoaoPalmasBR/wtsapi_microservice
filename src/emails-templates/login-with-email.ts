@@ -58,7 +58,7 @@ export const loginWithEmailTemplate = (url: string, email: string) => `
             color: rgb(0, 0, 0);
           "
         >
-          Bem vindo a RocketSend!
+          Bem vindo a Blibsend!
         </p>
         <p
           style="
@@ -99,7 +99,7 @@ export const loginWithEmailTemplate = (url: string, email: string) => `
                     text-decoration-line: none;
                   "
                   target="_blank"
-                  >Acessar RocketSend</a
+                  >Acessar Blibsend</a
                 >
               </td>
             </tr>
