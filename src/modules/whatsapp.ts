@@ -23,12 +23,10 @@ interface WtsAPISession extends WhatsApp, SessionExternalProps {}
 
 class WtsAPISessionManager {
   private rabbit: Connection;
-  private sessions: WtsAPISession[] = [];
+  // private sessions: WtsAPISession[] = [];
   private socket: Socket = WebSocket(
     `ws://localhost:${Number(process.env.WEBSOCKET_PORT || "3007")}`,
-    {
-      transports: ["websocket"],
-    }
+    { transports: ["websocket"] }
   );
 
   constructor() {
@@ -40,6 +38,8 @@ class WtsAPISessionManager {
       console.log(
         "WTS_SERVICE: WhatsApp Worker connection successfully (re)established"
       );
+
+      this.rabbit.emit("wtsapi:disable_all_sessions", {});
     });
 
     this.socket.on("connect", () => {
@@ -89,8 +89,6 @@ class WtsAPISessionManager {
     });
 
     whatsapp.on("qr", (qr) => {
-      // qrcode.generate(qr, { small: true });
-
       console.log(
         `WTS_SERVICE: QR Code generated for ${
           data.token
@@ -99,9 +97,7 @@ class WtsAPISessionManager {
 
       this.socket.emit("INTERNAL:qr_code", {
         clientId: data.client_id,
-        data: {
-          qr: qr,
-        },
+        data: { qr: qr },
       });
     });
 
@@ -128,7 +124,7 @@ class WtsAPISessionManager {
       console.log("WTS_SERVICE: Message consumer started:", data.token);
     });
 
-    whatsapp.on("authenticated", async (session) => {
+    whatsapp.on("authenticated", async (_session) => {
       console.log("WTS_SERVICE: Session authenticated:", data.token);
 
       const _newSession: WtsAPISession = Object.assign(whatsapp, {
@@ -138,35 +134,26 @@ class WtsAPISessionManager {
         client_id: data.client_id,
       });
 
-      this.sessions.push(_newSession);
+      // this.sessions.push(_newSession);
 
-      // await axios.post(data.webhook, {
-      //   status: "authenticated",
-      //   token: data.token,
-      // });
+      this.rabbit.emit("wtsapi:session_started", { token: data.token });
     });
 
     whatsapp.on("auth_failure", async (msg) => {
       console.log("WTS_SERVICE: Auth failure:", msg);
 
-      // await axios.post(data.webhook, {
-      //   status: "auth_failure",
-      //   token: data.token,
-      // });
+      this.rabbit.emit("wtsapi:session_auth_failure", { token: data.token });
     });
 
     whatsapp.on("disconnected", async (reason) => {
       console.log("WTS_SERVICE: Session disconnected:", reason);
 
-      // await axios.post(data.webhook, {
-      //   status: "disconnected",
-      //   token: data.token,
-      // });
+      this.rabbit.emit("wtsapi:session_disconnected", { token: data.token });
 
-      const index = this.sessions.findIndex((s) => s.token === data.token);
-      if (index !== -1) {
-        this.sessions.splice(index, 1);
-      }
+      // const index = this.sessions.findIndex((s) => s.token === data.token);
+      // if (index !== -1) {
+      //   this.sessions.splice(index, 1);
+      // }
     });
 
     await whatsapp.initialize();

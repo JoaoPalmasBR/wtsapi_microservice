@@ -17,7 +17,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
-            cd /root/deploy/rocketsend/wtsapi_microservice
+            cd /root/deploy/wtsapi/wtsapi_microservice
             export NODE_ENV=production
             export RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
             export EMAIL_HOST=${{ secrets.EMAIL_HOST }}
@@ -46,7 +46,7 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
-            cd /root/deploy/rocketsend/wtsapi_microservice
+            cd /root/deploy/wtsapi/wtsapi_microservice
             git pull origin main
             rm -rf node_modules/
             yarn
