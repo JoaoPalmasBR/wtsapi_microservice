@@ -1,14 +1,14 @@
 import { Socket } from "socket.io-client";
 import { io as WebSocket } from "socket.io-client";
 
-import { Connection, ConsumerProps } from "rabbitmq-client";
+import { Connection, ConsumerProps, Publisher } from "rabbitmq-client";
 import { LocalAuth, Client as WhatsApp } from "whatsapp-web.js";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
   queueOptions: { durable: true },
   qos: { prefetchCount: 2 },
-  // exchanges: [{ exchange: "my-events", type: "topic" }],
+  // exchanges: [{ exchange: "emails-events", type: "topic" }],
   // queueBindings: [{ exchange: "my-events", routingKey: "users.*" }],
 };
 
@@ -23,7 +23,7 @@ interface WtsAPISession extends WhatsApp, SessionExternalProps {}
 
 class WtsAPISessionManager {
   private rabbit: Connection;
-  // private sessions: WtsAPISession[] = [];
+  private rabbitPublisher: Publisher;
   private socket: Socket = WebSocket(
     `ws://localhost:${Number(process.env.WEBSOCKET_PORT || "3007")}`,
     { transports: ["websocket"] }
@@ -38,8 +38,26 @@ class WtsAPISessionManager {
       console.log(
         "WTS_SERVICE: WhatsApp Worker connection successfully (re)established"
       );
+    });
 
-      this.rabbit.emit("wtsapi:disable_all_sessions", {});
+    this.rabbitPublisher = this.rabbit.createPublisher({
+      queues: [
+        { queue: "wtsapi.events" },
+        { queue: "wtsapi:session_started", durable: true },
+        { queue: "wtsapi:session_auth_failure", durable: true },
+        { queue: "wtsapi:session_disconnected", durable: true },
+        { queue: "wtsapi:disable_all_sessions", durable: true },
+      ],
+      confirm: true,
+      maxAttempts: 2,
+      exchanges: [
+        {
+          exchange: "wtsapi-events",
+          type: "topic",
+          durable: false,
+        },
+      ],
+      queueBindings: [{ exchange: "wtsapi-events", routingKey: "wtsapi.*" }],
     });
 
     this.socket.on("connect", () => {
@@ -63,6 +81,8 @@ class WtsAPISessionManager {
       this.onSessionStart(data);
     });
 
+    await this.rabbitPublisher.send("wtsapi:disable_all_sessions", {});
+
     sub.on("error", (err) => {
       console.log("WTS_SERVICE: consumer error (user-events)", err);
     });
@@ -75,7 +95,7 @@ class WtsAPISessionManager {
 
     const whatsapp = new WhatsApp({
       authStrategy: new LocalAuth({ clientId: data.token }),
-      qrMaxRetries: 4,
+      qrMaxRetries: 5,
       puppeteer: {
         headless: true,
         args: [
@@ -134,26 +154,34 @@ class WtsAPISessionManager {
         client_id: data.client_id,
       });
 
-      // this.sessions.push(_newSession);
+      this.socket.emit("INTERNAL:notification-web", {
+        clientId: data.client_id,
+        data: {
+          type: "sucess",
+          title: "WhatsApp Session",
+          description: "Session started successfully",
+        },
+      });
 
-      this.rabbit.emit("wtsapi:session_started", { token: data.token });
+      await this.rabbitPublisher.send("wtsapi:session_started", {
+        token: data.token,
+      });
     });
 
     whatsapp.on("auth_failure", async (msg) => {
       console.log("WTS_SERVICE: Auth failure:", msg);
 
-      this.rabbit.emit("wtsapi:session_auth_failure", { token: data.token });
+      await this.rabbitPublisher.send("wtsapi:session_auth_failure", {
+        token: data.token,
+      });
     });
 
     whatsapp.on("disconnected", async (reason) => {
       console.log("WTS_SERVICE: Session disconnected:", reason);
 
-      this.rabbit.emit("wtsapi:session_disconnected", { token: data.token });
-
-      // const index = this.sessions.findIndex((s) => s.token === data.token);
-      // if (index !== -1) {
-      //   this.sessions.splice(index, 1);
-      // }
+      await this.rabbitPublisher.send("wtsapi:session_disconnected", {
+        token: data.token,
+      });
     });
 
     await whatsapp.initialize();
