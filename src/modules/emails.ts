@@ -60,7 +60,7 @@ class EmailsProcessor {
             msg.body.toString()
           );
 
-          if (!data.to || !data.verification_code) {
+          if (!data.to || !data.verificationCode) {
             console.log("WTSAPI: Email confirmation data is invalid");
             return;
           }
@@ -72,10 +72,7 @@ class EmailsProcessor {
               to: data.to,
               subject: "Blibsend - Confirmação de conta",
               from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
-              html: templateConfirmationAccount(
-                data.to,
-                data.verification_code
-              ),
+              html: templateConfirmationAccount(data.to, data.verificationCode),
             })
             .catch((err) => {
               console.log("WTSAPI: Error sending email", err.message);
@@ -109,7 +106,7 @@ class EmailsProcessor {
             msg.body.toString()
           );
 
-          if (!dataCredentials.to || !dataCredentials.client_id) {
+          if (!dataCredentials.to || !dataCredentials.clientId) {
             console.log("WTSAPI: Email credentials data is invalid");
             return;
           }
@@ -124,8 +121,8 @@ class EmailsProcessor {
               from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
               html: emailCredentials(
                 dataCredentials.name,
-                dataCredentials.client_id,
-                dataCredentials.client_secret
+                dataCredentials.clientId,
+                dataCredentials.clientSecret
               ),
             })
             .catch((err) => {

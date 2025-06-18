@@ -15,7 +15,7 @@ io.on("connection", (socket) => {
     console.log(
       "WTSAPI: Received notification-web event, re-emitting to all clients"
     );
-    
+
     io.emit("WTSAPI:notification-to-front", payload);
   });
 

@@ -9,7 +9,7 @@ const rabbitConfig: ConsumerProps = {
 };
 
 interface NotificationMsgProps {
-  client_id: string;
+  clientId: string;
   type: "destructive" | "default";
   title: string;
   description: string;
@@ -21,9 +21,7 @@ new (class NotificationService {
 
   private socket: Socket = WebSocket(
     `ws://localhost:${Number(process.env.WEBSOCKET_PORT || "3007")}`,
-    {
-      transports: ["websocket"],
-    }
+    { transports: ["websocket"] }
   );
 
   constructor() {
@@ -56,7 +54,7 @@ new (class NotificationService {
       });
 
       this.socket.emit("INTERNAL:notification-web", {
-        clientId: data.client_id,
+        clientId: data.clientId,
         msg: {
           type: data.type,
           title: data.title,

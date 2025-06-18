@@ -1,7 +1,7 @@
 export interface ConfirmationAccountEmailProps {
   to: string;
   name: string;
-  verification_code: string;
+  verificationCode: string;
 }
 
 export interface LoginUrlEmailProps {
@@ -13,6 +13,6 @@ export interface LoginUrlEmailProps {
 export interface CredentialsEmailProps {
   to: string;
   name: string;
-  client_id: string;
-  client_secret: string;
+  clientId: string;
+  clientSecret: string;
 }

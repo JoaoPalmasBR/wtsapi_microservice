@@ -3,6 +3,7 @@ import { io as WebSocket } from "socket.io-client";
 
 import { Connection, ConsumerProps, Publisher } from "rabbitmq-client";
 import { LocalAuth, Client as WhatsApp } from "whatsapp-web.js";
+import axios from "axios";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
@@ -16,10 +17,8 @@ interface SessionExternalProps {
   name: string;
   token: string;
   webhook: string;
-  client_id: string;
+  clientId: string;
 }
-
-interface WtsAPISession extends WhatsApp, SessionExternalProps {}
 
 class WtsAPISessionManager {
   private rabbit: Connection;
@@ -116,7 +115,7 @@ class WtsAPISessionManager {
       );
 
       this.socket.emit("INTERNAL:qr_code", {
-        clientId: data.client_id,
+        clientId: data.clientId,
         data: { qr: qr },
       });
     });
@@ -141,21 +140,92 @@ class WtsAPISessionManager {
         console.log("WTS_SERVICE: consumer error (send-message)", err);
       });
 
+      const sessionManager = this.rabbit.createConsumer(
+        {
+          queue: `wtsapi:${data.token}:session.manager`,
+          queueOptions: { durable: true },
+          qos: { prefetchCount: 2 },
+        },
+        async (msg) => {
+          interface MsgProps {
+            event: string;
+            data: object;
+          }
+
+          const dataEvent: MsgProps = JSON.parse(msg.body.toString());
+
+          switch (dataEvent.event) {
+            case "disconnect_session": {
+              this.socket.emit("INTERNAL:notification-web", {
+                clientId: data.clientId,
+                data: {
+                  type: "destructive",
+                  title: "WhatsApp Session",
+                  description: "Sessão do whatsapp está sendo encerrada!",
+                },
+              });
+
+              await whatsapp.destroy();
+
+              await this.rabbitPublisher.send("wtsapi:session_disconnected", {
+                token: data.token,
+              });
+              break;
+            }
+            default:
+              console.log(`WTS_SERVICE: Session manager event not found`);
+          }
+        }
+      );
+
+      sessionManager.on("error", (err) => {
+        console.log("WTS_SERVICE: consumer error (session-manager)", err);
+      });
+
       console.log("WTS_SERVICE: Message consumer started:", data.token);
+    });
+
+    whatsapp.on("message", async (message) => {
+      console.log(
+        `WTS_SERVICE: New message received from ${
+          message.from
+        } at ${new Date().toLocaleTimeString()} | Session: ${data.token}`
+      );
+
+      if (!message.isStatus && message.type === "chat") {
+        try {
+          const contact = await message.getContact();
+
+          console.log(
+            `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
+          );
+
+          await axios.post(data.webhook, {
+            wts_session_token: data.token,
+            contact: {
+              name: contact.pushname || "Unknown_Contact",
+              number: contact.number,
+              contactId: contact.id._serialized,
+              photo: await contact.getProfilePicUrl(),
+            },
+            message: {
+              id: message.id._serialized,
+              body: message.body,
+              type: message.type,
+              timestamp: message.timestamp,
+            },
+          });
+        } catch (err) {
+          console.log(`WTS_SERVICE: Error in sent message to webhook`, err);
+        }
+      }
     });
 
     whatsapp.on("authenticated", async (_session) => {
       console.log("WTS_SERVICE: Session authenticated:", data.token);
 
-      const _newSession: WtsAPISession = Object.assign(whatsapp, {
-        name: data.name,
-        token: data.token,
-        webhook: data.webhook,
-        client_id: data.client_id,
-      });
-
       this.socket.emit("INTERNAL:notification-web", {
-        clientId: data.client_id,
+        clientId: data.clientId,
         data: {
           type: "sucess",
           title: "WhatsApp Session",
@@ -184,7 +254,7 @@ class WtsAPISessionManager {
       });
     });
 
-    await whatsapp.initialize();
+    whatsapp.initialize();
 
     console.log("WTS_SERVICE: Session initialized:", data.token);
   }
