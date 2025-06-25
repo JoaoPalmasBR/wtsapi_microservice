@@ -156,20 +156,37 @@ class WtsAPISessionManager {
 
           switch (dataEvent.event) {
             case "disconnect_session": {
-              this.socket.emit("INTERNAL:notification-web", {
-                clientId: data.clientId,
-                data: {
-                  type: "destructive",
-                  title: "WhatsApp Session",
-                  description: "Sessão do whatsapp está sendo encerrada!",
-                },
-              });
+              try {
+                console.log(
+                  `WTS_SERVICE: Disconnecting session: ${data.token}`
+                );
 
-              await whatsapp.destroy();
+                this.socket.emit("INTERNAL:notification-web", {
+                  clientId: data.clientId,
+                  data: {
+                    type: "destructive",
+                    title: "WhatsApp Session",
+                    description: "Sessão do whatsapp está sendo encerrada!",
+                  },
+                });
 
-              await this.rabbitPublisher.send("wtsapi:session_disconnected", {
-                token: data.token,
-              });
+                await whatsapp.destroy();
+
+                console.log(`WTS_SERVICE: Session destroyed: ${data.token}`);
+
+                await this.rabbitPublisher.send("wtsapi:session_disconnected", {
+                  token: data.token,
+                });
+              } catch (err) {
+                const errorMessage =
+                  err instanceof Error ? err.message : "Unknown error";
+
+                console.log(
+                  `WTS_SERVICE: Error disconnecting session ${data.token}`,
+                  errorMessage
+                );
+              }
+
               break;
             }
             default:
@@ -192,7 +209,7 @@ class WtsAPISessionManager {
         } at ${new Date().toLocaleTimeString()} | Session: ${data.token}`
       );
 
-      if (!message.isStatus && message.type === "chat") {
+      if (!message.isStatus && message.type === "chat" && !message.fromMe) {
         try {
           const contact = await message.getContact();
 
@@ -200,25 +217,71 @@ class WtsAPISessionManager {
             `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
           );
 
-          await axios.post(data.webhook, {
-            wts_session_token: data.token,
-            contact: {
-              name: contact.pushname || "Unknown_Contact",
-              number: contact.number,
-              contactId: contact.id._serialized,
-              photo: await contact.getProfilePicUrl(),
-            },
-            message: {
-              id: message.id._serialized,
-              body: message.body,
-              type: message.type,
-              timestamp: message.timestamp,
-            },
-          });
+          let countTry: number = 0;
+
+          // Retry logic in case of failure
+          while (countTry < 5) {
+            try {
+              countTry++;
+              console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
+
+              await axios.post(
+                data.webhook,
+                {
+                  wts_session_token: data.token,
+                  contact: {
+                    name: contact.pushname || "Unknown_Contact",
+                    number: contact.number,
+                    contactId: contact.id._serialized,
+                    photo: await contact.getProfilePicUrl(),
+                  },
+                  message: {
+                    id: message.id._serialized,
+                    body: message.body,
+                    type: message.type,
+                    timestamp: message.timestamp,
+                  },
+                },
+                {
+                  headers: {
+                    "Content-Type": "application/json",
+                    "User-Agent": "WTSAPI-Webhook-Client",
+                  },
+                  timeout: 5000, // Timeout after 5 seconds
+                }
+              );
+              console.log(`WTS_SERVICE: Webhook sent successfully`);
+              break; // Exit loop if successful
+            } catch (error) {
+              const errorMessage =
+                error instanceof Error ? error.message : "Unknown error";
+
+              console.error(
+                `WTS_SERVICE: Error sending webhook: ${errorMessage}`
+              );
+
+              if (countTry >= 5) {
+                console.error(
+                  `WTS_SERVICE: Failed to send webhook after 5 attempts`
+                );
+                break; // Exit loop
+              }
+              
+              console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
+              await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
+            }
+          }
         } catch (err) {
-          console.log(`WTS_SERVICE: Error in sent message to webhook`, err);
+          console.log(`WTS_SERVICE: Error in sent message to webhook`);
         }
       }
+
+      // if (message.hasMedia) {
+      //   // Handle message voice audio.
+      //   const base64Media = await message.downloadMedia();
+
+      //   // if (base64Media.mimetype )
+      // }
     });
 
     whatsapp.on("authenticated", async (_session) => {
