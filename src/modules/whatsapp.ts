@@ -170,7 +170,7 @@ class WtsAPISessionManager {
                   },
                 });
 
-                await whatsapp.destroy();
+                await whatsapp.logout();
 
                 console.log(`WTS_SERVICE: Session destroyed: ${data.token}`);
 
@@ -188,6 +188,31 @@ class WtsAPISessionManager {
               }
 
               break;
+            }
+            case "send_typing_event": {
+              try {
+                const { to } = dataEvent.data as { to: string };
+
+                console.log(
+                  `WTS_SERVICE: Typing event sent to ${to} in session ${data.token}`
+                );
+
+                const chat = await whatsapp.getChatById(`${to}@c.us`);
+
+                await chat.sendStateTyping();
+
+                setTimeout(async () => {
+                  await chat.clearState();
+                }, 8000);
+              } catch (err) {
+                const errorMessage =
+                  err instanceof Error ? err.message : "Unknown error";
+
+                console.log(
+                  `WTS_SERVICE: Error sending typing event in session ${data.token}`,
+                  errorMessage
+                );
+              }
             }
             default:
               console.log(`WTS_SERVICE: Session manager event not found`);
@@ -221,16 +246,9 @@ class WtsAPISessionManager {
 
         if (message.hasMedia) {
           // Handle message voice audio.
-          console.log(
-            `WTS_SERVICE: Message with media received from ${
-              message.from
-            } at ${new Date().toLocaleTimeString()} | Session: ${data.token}`
-          );
-
           const base64Media = await message.downloadMedia();
 
           if (base64Media.mimetype === "audio/ogg; codecs=opus") {
-            // Handle voice message
             console.log(
               `WTS_SERVICE: Send voice message to webhook for ${data.token}`
             );
@@ -241,6 +259,7 @@ class WtsAPISessionManager {
               try {
                 countTry++;
                 console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
+
                 await axios.post(
                   data.webhook,
                   {
@@ -267,17 +286,20 @@ class WtsAPISessionManager {
               } catch (error) {
                 const errorMessage =
                   error instanceof Error ? error.message : "Unknown error";
+
                 console.error(
                   `WTS_SERVICE: Error sending webhook: ${errorMessage}`
                 );
+
                 if (countTry >= 5) {
                   console.error(
                     `WTS_SERVICE: Failed to send webhook after 5 attempts`
                   );
                   break; // Exit loop
                 }
+
                 console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
+                await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
               }
             }
           }
@@ -292,6 +314,7 @@ class WtsAPISessionManager {
               try {
                 countTry++;
                 console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
+
                 await axios.post(
                   data.webhook,
                   {
@@ -317,17 +340,20 @@ class WtsAPISessionManager {
               } catch (error) {
                 const errorMessage =
                   error instanceof Error ? error.message : "Unknown error";
+
                 console.error(
                   `WTS_SERVICE: Error sending webhook: ${errorMessage}`
                 );
+
                 if (countTry >= 5) {
                   console.error(
                     `WTS_SERVICE: Failed to send webhook after 5 attempts`
                   );
                   break; // Exit loop
                 }
+
                 console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
+                await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
               }
             }
           } catch (err) {
