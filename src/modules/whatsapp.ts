@@ -130,14 +130,24 @@ class WtsAPISessionManager {
           qos: { prefetchCount: 2 },
         },
         async (msg) => {
-          const message = JSON.parse(msg.body.toString());
+          try {
+            const message = JSON.parse(msg.body.toString());
 
-          await whatsapp.sendMessage(`${message.to}@c.us`, message.body);
+            await whatsapp.sendMessage(`${message.to}@c.us`, message.body);
+          } catch (err) {
+            const errorMessage =
+              err instanceof Error ? err.message : "Unknown error";
+
+            console.log(
+              `WTS_SERVICE: Error sending message in session ${data.token}`,
+              errorMessage
+            );
+          }
         }
       );
 
       subMessage.on("error", (err) => {
-        console.log("WTS_SERVICE: consumer error (send-message)", err);
+        console.log("WTS_SERVICE: Consumer rabbit error (send-message)", err);
       });
 
       const sessionManager = this.rabbit.createConsumer(
