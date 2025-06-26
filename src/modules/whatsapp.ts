@@ -213,7 +213,7 @@ class WtsAPISessionManager {
 
                 setTimeout(async () => {
                   await chat.clearState();
-                }, 8000);
+                }, 15000);
               } catch (err) {
                 const errorMessage =
                   err instanceof Error ? err.message : "Unknown error";
