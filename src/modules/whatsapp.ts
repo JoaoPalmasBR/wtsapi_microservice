@@ -4,6 +4,7 @@ import { io as WebSocket } from "socket.io-client";
 import { Connection, ConsumerProps, Publisher } from "rabbitmq-client";
 import { LocalAuth, Client as WhatsApp } from "whatsapp-web.js";
 import axios from "axios";
+import { SendMessageDto } from "../dtos/whatsapp";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
@@ -90,6 +91,7 @@ class WtsAPISessionManager {
   }
 
   private async onSessionStart(data: SessionExternalProps) {
+    let sessionWebhookEnabled: boolean = true;
     console.log("WTS_SERVICE: Starting session:", data.token);
 
     const whatsapp = new WhatsApp({
@@ -131,9 +133,22 @@ class WtsAPISessionManager {
         },
         async (msg) => {
           try {
-            const message = JSON.parse(msg.body.toString());
+            const message: SendMessageDto = JSON.parse(msg.body.toString());
 
-            await whatsapp.sendMessage(`${message.to}@c.us`, message.body);
+            if (message.to instanceof Array) {
+              console.log(
+                `WTS_SERVICE: Sending message to multiple recipients in session ${data.token}`
+              );
+              for (const recipient of message.to) {
+                console.log(
+                  `WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`
+                );
+
+                await whatsapp.sendMessage(`${recipient}@c.us`, message.body);
+              }
+            } else {
+              await whatsapp.sendMessage(`${message.to}@c.us`, message.body);
+            }
           } catch (err) {
             const errorMessage =
               err instanceof Error ? err.message : "Unknown error";
@@ -224,6 +239,26 @@ class WtsAPISessionManager {
                 );
               }
             }
+            case "update_webhook_state": {
+              try {
+                console.log(
+                  `WTS_SERVICE: Webhook state updated to ${!sessionWebhookEnabled} for session ${
+                    data.token
+                  }`
+                );
+
+                sessionWebhookEnabled = !sessionWebhookEnabled;
+              } catch (err) {
+                const errorMessage =
+                  err instanceof Error ? err.message : "Unknown error";
+
+                console.log(
+                  `WTS_SERVICE: Error updating webhook state in session ${data.token}`,
+                  errorMessage
+                );
+              }
+              break;
+            }
             default:
               console.log(`WTS_SERVICE: Session manager event not found`);
           }
@@ -244,130 +279,136 @@ class WtsAPISessionManager {
         } at ${new Date().toLocaleTimeString()} | Session: ${data.token}`
       );
 
-      if (!message.isStatus && !message.fromMe) {
-        const contact = await message.getContact();
+      if (sessionWebhookEnabled) {
+        if (!message.isStatus && !message.fromMe) {
+          const contact = await message.getContact();
 
-        const contactData = {
-          name: contact.pushname || "Unknown_Contact",
-          number: contact.number,
-          contactId: contact.id._serialized,
-          photo: await contact.getProfilePicUrl(),
-        };
+          const contactData = {
+            name: contact.pushname || "Unknown_Contact",
+            number: contact.number,
+            contactId: contact.id._serialized,
+            photo: await contact.getProfilePicUrl(),
+          };
 
-        if (message.hasMedia) {
-          // Handle message voice audio.
-          const base64Media = await message.downloadMedia();
+          if (message.hasMedia) {
+            // Handle message voice audio.
+            const base64Media = await message.downloadMedia();
 
-          if (base64Media.mimetype === "audio/ogg; codecs=opus") {
-            console.log(
-              `WTS_SERVICE: Send voice message to webhook for ${data.token}`
-            );
+            if (base64Media.mimetype === "audio/ogg; codecs=opus") {
+              console.log(
+                `WTS_SERVICE: Send voice message to webhook for ${data.token}`
+              );
 
-            let countTry: number = 0;
+              let countTry: number = 0;
 
-            while (countTry < 5) {
-              try {
-                countTry++;
-                console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
-
-                await axios.post(
-                  data.webhook,
-                  {
-                    wts_session_token: data.token,
-                    contact: contactData,
-                    message: {
-                      id: message.id._serialized,
-                      body: base64Media.data,
-                      type: "voice",
-                      mymetype: base64Media.mimetype,
-                      timestamp: message.timestamp,
-                    },
-                  },
-                  {
-                    headers: {
-                      "Content-Type": "application/json",
-                      "User-Agent": "WTSAPI-Webhook-Client",
-                    },
-                    timeout: 5000, // Timeout after 5 seconds
-                  }
-                );
-                console.log(`WTS_SERVICE: Webhook sent successfully`);
-                break; // Exit loop if successful
-              } catch (error) {
-                const errorMessage =
-                  error instanceof Error ? error.message : "Unknown error";
-
-                console.error(
-                  `WTS_SERVICE: Error sending webhook: ${errorMessage}`
-                );
-
-                if (countTry >= 5) {
-                  console.error(
-                    `WTS_SERVICE: Failed to send webhook after 5 attempts`
+              while (countTry < 5) {
+                try {
+                  countTry++;
+                  console.log(
+                    `WTS_SERVICE: Attempt ${countTry} to send webhook`
                   );
-                  break; // Exit loop
-                }
 
-                console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
+                  await axios.post(
+                    data.webhook,
+                    {
+                      wts_session_token: data.token,
+                      contact: contactData,
+                      message: {
+                        id: message.id._serialized,
+                        body: base64Media.data,
+                        type: "voice",
+                        mymetype: base64Media.mimetype,
+                        timestamp: message.timestamp,
+                      },
+                    },
+                    {
+                      headers: {
+                        "Content-Type": "application/json",
+                        "User-Agent": "WTSAPI-Webhook-Client",
+                      },
+                      timeout: 5000, // Timeout after 5 seconds
+                    }
+                  );
+                  console.log(`WTS_SERVICE: Webhook sent successfully`);
+                  break; // Exit loop if successful
+                } catch (error) {
+                  const errorMessage =
+                    error instanceof Error ? error.message : "Unknown error";
+
+                  console.error(
+                    `WTS_SERVICE: Error sending webhook: ${errorMessage}`
+                  );
+
+                  if (countTry >= 5) {
+                    console.error(
+                      `WTS_SERVICE: Failed to send webhook after 5 attempts`
+                    );
+                    break; // Exit loop
+                  }
+
+                  console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
+                  await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
+                }
               }
             }
-          }
-        } else if (message.type === "chat") {
-          try {
-            console.log(
-              `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
-            );
-            let countTry: number = 0;
-            // Retry logic in case of failure
-            while (countTry < 5) {
-              try {
-                countTry++;
-                console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
-
-                await axios.post(
-                  data.webhook,
-                  {
-                    wts_session_token: data.token,
-                    contact: contactData,
-                    message: {
-                      id: message.id._serialized,
-                      body: message.body,
-                      type: message.type,
-                      timestamp: message.timestamp,
-                    },
-                  },
-                  {
-                    headers: {
-                      "Content-Type": "application/json",
-                      "User-Agent": "WTSAPI-Webhook-Client",
-                    },
-                    timeout: 5000, // Timeout after 5 seconds
-                  }
-                );
-                console.log(`WTS_SERVICE: Webhook sent successfully`);
-                break; // Exit loop if successful
-              } catch (error) {
-                const errorMessage =
-                  error instanceof Error ? error.message : "Unknown error";
-
-                console.error(
-                  `WTS_SERVICE: Error sending webhook: ${errorMessage}`
-                );
-
-                if (countTry >= 5) {
-                  console.error(
-                    `WTS_SERVICE: Failed to send webhook after 5 attempts`
+          } else if (message.type === "chat") {
+            try {
+              console.log(
+                `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
+              );
+              let countTry: number = 0;
+              // Retry logic in case of failure
+              while (countTry < 5) {
+                try {
+                  countTry++;
+                  console.log(
+                    `WTS_SERVICE: Attempt ${countTry} to send webhook`
                   );
-                  break; // Exit loop
-                }
 
-                console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
+                  await axios.post(
+                    data.webhook,
+                    {
+                      wts_session_token: data.token,
+                      contact: contactData,
+                      message: {
+                        id: message.id._serialized,
+                        body: message.body,
+                        type: message.type,
+                        timestamp: message.timestamp,
+                      },
+                    },
+                    {
+                      headers: {
+                        "Content-Type": "application/json",
+                        "User-Agent": "WTSAPI-Webhook-Client",
+                      },
+                      timeout: 5000, // Timeout after 5 seconds
+                    }
+                  );
+                  console.log(`WTS_SERVICE: Webhook sent successfully`);
+                  break; // Exit loop if successful
+                } catch (error) {
+                  const errorMessage =
+                    error instanceof Error ? error.message : "Unknown error";
+
+                  console.error(
+                    `WTS_SERVICE: Error sending webhook: ${errorMessage}`
+                  );
+
+                  if (countTry >= 5) {
+                    console.error(
+                      `WTS_SERVICE: Failed to send webhook after 5 attempts`
+                    );
+                    break; // Exit loop
+                  }
+
+                  console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
+                  await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
+                }
               }
+            } catch (err) {
+              console.log(`WTS_SERVICE: Error in sent message to webhook`);
             }
-          } catch (err) {
-            console.log(`WTS_SERVICE: Error in sent message to webhook`);
           }
         }
       }
