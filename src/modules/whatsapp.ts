@@ -428,7 +428,7 @@ class WtsAPISessionManager {
                           await axios.post(
                             data.webhook,
                             {
-                              wts_session_token: data.token,
+                              wts_session_token: data.token.trim(),
                               contact: contactData,
                               message: {
                                 id: messageId,
@@ -497,7 +497,7 @@ class WtsAPISessionManager {
                         await axios.post(
                           data.webhook,
                           {
-                            wts_session_token: data.token,
+                            wts_session_token: data.token.trim(),
                             contact: contactData,
                             message: {
                               id: messageId,
