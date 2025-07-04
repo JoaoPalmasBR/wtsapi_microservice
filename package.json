@@ -13,20 +13,27 @@
     "sentry:sourcemaps": "sentry-cli sourcemaps inject --org dc-sistemas --project simplix-wts-service ../../../../../../dist && sentry-cli sourcemaps upload --org dc-sistemas --project simplix-wts-service ../../../../../../dist"
   },
   "dependencies": {
+    "@cacheable/node-cache": "^1.5.8",
+    "@hapi/boom": "^10.0.1",
     "axios": "^1.8.4",
+    "baileys": "^6.7.18",
     "dotenv": "^16.5.0",
     "ioredis": "^5.6.1",
     "nodemailer": "^6.10.1",
     "nodemon": "^3.1.10",
+    "open": "^10.1.2",
+    "pino": "^9.7.0",
+    "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "rabbitmq-client": "^5.0.4",
+    "readline": "^1.3.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
-    "whatsapp-web.js": "^1.27.0",
     "ws": "^8.18.1"
   },
   "devDependencies": {
     "@types/nodemailer": "^6.4.17",
+    "@types/qrcode": "^1.5.5",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.18.1",
     "ts-node": "^10.9.2",

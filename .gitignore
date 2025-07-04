@@ -2,6 +2,10 @@
 .wwebjs_cache
 
 dist/
+sessions/
+.sessions/
 node_modules/
 
 .env
+
+*-wa-logs.txt

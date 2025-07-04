@@ -1,10 +1,31 @@
+import axios from "axios";
 import { Socket } from "socket.io-client";
 import { io as WebSocket } from "socket.io-client";
-
 import { Connection, ConsumerProps, Publisher } from "rabbitmq-client";
-import { LocalAuth, Client as WhatsApp } from "whatsapp-web.js";
-import axios from "axios";
+
+import fs from "fs";
+import p from "child_process";
+import open from "open";
+import pino from "pino";
+
+import { Boom } from "@hapi/boom";
+import Readline from "readline";
+import NodeCache from "@cacheable/node-cache";
+
+import makeWASocket, {
+  delay,
+  Browsers,
+  DisconnectReason,
+  AnyMessageContent,
+  downloadMediaMessage,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+} from "baileys";
+
 import { SendMessageDto } from "../dtos/whatsapp";
+import { DESTRUCTION } from "dns";
+import { ContactDto } from "../dtos/contact";
+import { send } from "process";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
@@ -91,78 +112,447 @@ class WtsAPISessionManager {
   }
 
   private async onSessionStart(data: SessionExternalProps) {
-    let sessionWebhookEnabled: boolean = true;
-    console.log("WTS_SERVICE: Starting session:", data.token);
+    try {
+      let sessionWebhookEnabled: boolean = true;
+      console.log("WTS_SERVICE: Starting session:", data.token);
 
-    const whatsapp = new WhatsApp({
-      authStrategy: new LocalAuth({ clientId: data.token }),
-      qrMaxRetries: 5,
-      puppeteer: {
-        headless: true,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-accelerated-2d-canvas",
-          "--disable-gpu",
-        ],
-      },
-    });
+      const logger = pino(
+        { timestamp: () => `,"time":"${new Date().toJSON()}"` },
+        pino.destination(`./${data.token}-wa-logs.txt`)
+      );
+      logger.level = "trace";
 
-    whatsapp.on("qr", (qr) => {
+      const msgRetryCounterCache = new NodeCache();
+
+      const rl = Readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const { state, saveCreds } = await useMultiFileAuthState(
+        `./.sessions/${data.token}`
+      );
+      const { version, isLatest } = await fetchLatestBaileysVersion();
+
       console.log(
-        `WTS_SERVICE: QR Code generated for ${
-          data.token
-        } - ${new Date().toLocaleTimeString()}`
+        `WTS_SERVICE: Using WA version ${version.join(
+          "."
+        )} | Latest: ${isLatest}`
       );
 
-      this.socket.emit("INTERNAL:qr_code", {
-        clientId: data.clientId,
-        data: { qr: qr },
+      const whatsapp = makeWASocket({
+        logger,
+        browser: Browsers.appropriate("Desktop"),
+        auth: state,
+        msgRetryCounterCache,
+        generateHighQualityLinkPreview: true,
+        // getMessage: async (key: WAMessageKey) => {
+        //   console.log("get message", key);
+        //   return proto.Message.fromObject({});
+        // },
       });
-    });
 
-    whatsapp.on("ready", async () => {
-      console.log("WTS_SERVICE: Session ready:", data.token);
+      const sendMessageWTyping = async (
+        jid: string,
+        msg: AnyMessageContent
+      ) => {
+        await whatsapp.presenceSubscribe(jid);
+        await delay(500);
 
-      const subMessage = this.rabbit.createConsumer(
-        {
-          queue: `wtsapi:${data.token}:send.message`,
-          queueOptions: { durable: true },
-          qos: { prefetchCount: 2 },
-        },
-        async (msg) => {
-          try {
-            const message: SendMessageDto = JSON.parse(msg.body.toString());
+        await whatsapp.sendPresenceUpdate("composing", jid);
+        await delay(2000);
 
-            if (message.to instanceof Array) {
-              console.log(
-                `WTS_SERVICE: Sending message to multiple recipients in session ${data.token}`
+        await whatsapp.sendPresenceUpdate("paused", jid);
+
+        await whatsapp.sendMessage(jid, msg);
+      };
+
+      whatsapp.ev.process(async (events) => {
+        console.log(
+          `Received events: ${Object.keys(events).join(", ")} | Session: ${
+            data.token
+          } | Time: ${new Date().toLocaleTimeString()}`
+        );
+
+        if (events["connection.update"]) {
+          const { connection, lastDisconnect, qr } =
+            events["connection.update"];
+
+          switch (connection) {
+            case "open": {
+              console.log(`WTS_SERVICE: Session ${data.token} is now open`);
+
+              this.socket.emit("INTERNAL:notification-web", {
+                clientId: data.clientId,
+                data: {
+                  type: "sucess",
+                  title: "WhatsApp Session",
+                  description: "Sessão do whatsapp iniciada com sucesso!",
+                },
+              });
+
+              await this.rabbitPublisher.send("wtsapi:session_started", {
+                token: data.token,
+              });
+
+              const subMessage = this.rabbit.createConsumer(
+                {
+                  queue: `wtsapi:${data.token}:send.message`,
+                  queueOptions: { durable: true },
+                  qos: { prefetchCount: 2 },
+                },
+                async (msg) => {
+                  try {
+                    const message: SendMessageDto = JSON.parse(
+                      msg.body.toString()
+                    );
+
+                    if (message.to instanceof Array) {
+                      console.log(
+                        `WTS_SERVICE: Sending message to multiple recipients in session ${data.token}`
+                      );
+                      for (const recipient of message.to) {
+                        console.log(
+                          `WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`
+                        );
+
+                        await sendMessageWTyping(`${recipient}@c.us`, {
+                          text: message.body,
+                        });
+                      }
+                    } else {
+                      await sendMessageWTyping(`${message.to}@c.us`, {
+                        text: message.body,
+                      });
+                    }
+                  } catch (err) {
+                    const errorMessage =
+                      err instanceof Error ? err.message : "Unknown error";
+
+                    console.log(
+                      `WTS_SERVICE: Error sending message in session ${data.token}`,
+                      errorMessage
+                    );
+                  }
+                }
               );
-              for (const recipient of message.to) {
+
+              subMessage.on("error", (err) => {
                 console.log(
-                  `WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`
+                  "WTS_SERVICE: Consumer rabbit error (send-message)",
+                  err
+                );
+              });
+
+              break;
+            }
+            case "close": {
+              const status = (lastDisconnect?.error as Boom)?.output
+                ?.statusCode;
+
+              console.log(
+                `WTS_SERVICE: Session ${data.token} closed with status: ${status}`
+              );
+
+              if (status === DisconnectReason.badSession) {
+              } else if (status === DisconnectReason.connectionClosed) {
+                console.log(
+                  `WTS_SERVICE: Bad session file, please delete session: ${data.token}`
+                );
+                this.onSessionStart(data);
+              } else if (status === DisconnectReason.connectionLost) {
+                console.log(
+                  `WTS_SERVICE: Connection lost, restarting session: ${data.token}`
+                );
+                this.onSessionStart(data);
+              } else if (status === DisconnectReason.connectionReplaced) {
+                console.log(
+                  `WTS_SERVICE: Connection replaced, another session opened using the same session: ${data.token}`
                 );
 
-                await whatsapp.sendMessage(`${recipient}@c.us`, message.body);
+                this.socket.emit("INTERNAL:notification-web", {
+                  clientId: data.clientId,
+                  data: {
+                    type: "destructive",
+                    title: "WhatsApp Session",
+                    description:
+                      "Sessão desconectada porque foi aberta em outro dispositivo!",
+                  },
+                });
+
+                await this.rabbitPublisher.send("wtsapi:session_disconnected", {
+                  token: data.token,
+                });
+              } else if (status === DisconnectReason.loggedOut) {
+                await new Promise((resolve, reject) => {
+                  p.exec(
+                    `rm -rf ./.sessions/${data.token}`,
+                    (error, stdout, stderr) => {
+                      if (error) {
+                        console.error(
+                          `WTS_SERVICE: Error deleting session: ${error}`
+                        );
+
+                        reject(error);
+                        return;
+                      }
+                      if (stderr) {
+                        console.error(`WTS_SERVICE: Error: ${stderr}`);
+                        reject(new Error(stderr));
+                        return;
+                      }
+                      console.log(`WTS_SERVICE: Session deleted`);
+                      resolve(stdout);
+                    }
+                  );
+                });
+
+                console.log(
+                  `WTS_SERVICE: Device logged out, session invalid: ${data.token}`
+                );
+
+                await this.rabbitPublisher.send("wtsapi:session_disconnected", {
+                  token: data.token,
+                });
+              } else if (status === DisconnectReason.restartRequired) {
+                console.log(
+                  `WTS_SERVICE: Restart required, restarting session: ${data.token}`
+                );
+                this.onSessionStart(data);
+              } else if (status === DisconnectReason.timedOut) {
+                console.log(
+                  `WTS_SERVICE: Connection timed out, restarting session: ${data.token}`
+                );
+                this.onSessionStart(data);
+              } else {
+                console.log(
+                  `WTS_SERVICE: Unknown disconnect reason: ${status} | ${lastDisconnect?.error} - Restarting session: ${data.token}`
+                );
               }
-            } else {
-              await whatsapp.sendMessage(`${message.to}@c.us`, message.body);
+              break;
+            }
+            default: {
+              console.log(
+                `WTS_SERVICE: Connection update | Session: ${data.token}`
+              );
+              break;
+            }
+          }
+
+          if (qr) {
+            console.log(
+              `WTS_SERVICE: QR Code generated for ${
+                data.token
+              } - ${new Date().toLocaleTimeString()}`
+            );
+
+            this.socket.emit("INTERNAL:qr_code", {
+              clientId: data.clientId,
+              data: { qr: qr },
+            });
+          }
+        }
+
+        if (events["messages.upsert"]) {
+          try {
+            const upsert = events["messages.upsert"];
+            const time = new Date().toLocaleTimeString();
+
+            if (upsert.type === "notify") {
+              for (const msg of upsert.messages) {
+                console.log(
+                  `WTS_SERVICE: New message received from ${msg.key.remoteJid} at ${time} | Session: ${data.token} `
+                );
+
+                if (msg.key.fromMe || !msg.key.remoteJid || !msg.message) {
+                  console.log(
+                    `WTS_SERVICE: Ignoring message (from self, missing remoteJid, or missing content)... | Session: ${data.token}`
+                  );
+                  continue;
+                }
+
+                // Verifica se a mensagem é de um contato individual
+                const remoteJid = msg.key.remoteJid || "";
+                if (
+                  remoteJid.endsWith("@g.us") || // grupo
+                  remoteJid.endsWith("@broadcast") || // status
+                  remoteJid === "status@broadcast" // status
+                ) {
+                  console.log(
+                    `WTS_SERVICE: Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`
+                  );
+                  continue;
+                }
+
+                const photoUrl = await whatsapp.profilePictureUrl(
+                  msg.key.remoteJid,
+                  "image"
+                );
+
+                const contactData: ContactDto = {
+                  name: msg.pushName || "Unknown_Contact",
+                  number: msg.key.remoteJid.split("@")[0],
+                  contactId: msg.key.remoteJid,
+                  photo: photoUrl || "",
+                };
+
+                const messageId = await whatsapp.requestPlaceholderResend(
+                  msg.key
+                );
+
+                if (sessionWebhookEnabled) {
+                  if (msg.message?.audioMessage) {
+                    // Handle audio message
+                    const audioMessage = msg.message.audioMessage;
+
+                    if (audioMessage.mimetype === "audio/ogg; codecs=opus") {
+                      const media = await downloadMediaMessage(
+                        msg,
+                        "buffer",
+                        {}
+                      );
+
+                      console.log(
+                        `WTS_SERVICE: Send voice message to webhook for ${data.token}`
+                      );
+
+                      let countTry: number = 0;
+
+                      while (countTry < 5) {
+                        try {
+                          countTry++;
+                          console.log(
+                            `WTS_SERVICE: Attempt ${countTry} to send webhook`
+                          );
+
+                          await axios.post(
+                            data.webhook,
+                            {
+                              wts_session_token: data.token,
+                              contact: contactData,
+                              message: {
+                                id: messageId,
+                                body: media.toString("base64"),
+                                type: "voice",
+                                mymetype: msg.message.audioMessage.mimetype,
+                                timestamp: msg.messageTimestamp,
+                              },
+                            },
+                            {
+                              headers: {
+                                "Content-Type": "application/json",
+                                "User-Agent": "WTSAPI-Webhook-Client",
+                              },
+                              timeout: 5000, // Timeout after 5 seconds
+                            }
+                          );
+                          console.log(`WTS_SERVICE: Webhook sent successfully`);
+                          break; // Exit loop if successful
+                        } catch (error) {
+                          const errorMessage =
+                            error instanceof Error
+                              ? error.message
+                              : "Unknown error";
+
+                          console.error(
+                            `WTS_SERVICE: Error sending webhook: ${errorMessage}`
+                          );
+
+                          if (countTry >= 5) {
+                            console.error(
+                              `WTS_SERVICE: Failed to send webhook after 5 attempts`
+                            );
+                            break; // Exit loop
+                          }
+
+                          console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
+                          await new Promise((resolve) =>
+                            setTimeout(resolve, 4000)
+                          ); // Wait 4 seconds before retrying
+                        }
+                      }
+                    }
+                  }
+
+                  if (
+                    msg.message?.conversation ||
+                    msg.message?.extendedTextMessage?.text
+                  ) {
+                    const text =
+                      msg.message?.conversation ||
+                      msg.message?.extendedTextMessage?.text;
+
+                    console.log(
+                      `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
+                    );
+                    let countTry: number = 0;
+                    // Retry logic in case of failure
+                    while (countTry < 5) {
+                      try {
+                        countTry++;
+                        console.log(
+                          `WTS_SERVICE: Attempt ${countTry} to send webhook`
+                        );
+
+                        await axios.post(
+                          data.webhook,
+                          {
+                            wts_session_token: data.token,
+                            contact: contactData,
+                            message: {
+                              id: messageId,
+                              body: text,
+                              type: "chat",
+                              timestamp: msg.messageTimestamp,
+                            },
+                          },
+                          {
+                            headers: {
+                              "Content-Type": "application/json",
+                              "User-Agent": "WTSAPI-Webhook-Client",
+                            },
+                            timeout: 5000, // Timeout after 5 seconds
+                          }
+                        );
+                        console.log(`WTS_SERVICE: Webhook sent successfully`);
+                        break; // Exit loop if successful
+                      } catch (error) {
+                        const errorMessage =
+                          error instanceof Error
+                            ? error.message
+                            : "Unknown error";
+
+                        console.error(
+                          `WTS_SERVICE: Error sending webhook: ${errorMessage}`
+                        );
+
+                        if (countTry >= 5) {
+                          console.error(
+                            `WTS_SERVICE: Failed to send webhook after 5 attempts`
+                          );
+                          break; // Exit loop
+                        }
+
+                        console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
+                        await new Promise((resolve) =>
+                          setTimeout(resolve, 4000)
+                        ); // Wait 4 seconds before retrying
+                      }
+                    }
+                  }
+                }
+              }
             }
           } catch (err) {
             const errorMessage =
               err instanceof Error ? err.message : "Unknown error";
 
-            console.log(
-              `WTS_SERVICE: Error sending message in session ${data.token}`,
+            console.error(
+              `WTS_SERVICE: Error in send message to webhook in session ${data.token}`,
               errorMessage
             );
           }
         }
-      );
-
-      subMessage.on("error", (err) => {
-        console.log("WTS_SERVICE: Consumer rabbit error (send-message)", err);
       });
 
       const sessionManager = this.rabbit.createConsumer(
@@ -186,15 +576,6 @@ class WtsAPISessionManager {
                   `WTS_SERVICE: Disconnecting session: ${data.token}`
                 );
 
-                this.socket.emit("INTERNAL:notification-web", {
-                  clientId: data.clientId,
-                  data: {
-                    type: "destructive",
-                    title: "WhatsApp Session",
-                    description: "Sessão do whatsapp está sendo encerrada!",
-                  },
-                });
-
                 await whatsapp.logout();
 
                 console.log(`WTS_SERVICE: Session destroyed: ${data.token}`);
@@ -215,29 +596,8 @@ class WtsAPISessionManager {
               break;
             }
             case "send_typing_event": {
-              try {
-                const { to } = dataEvent.data as { to: string };
-
-                console.log(
-                  `WTS_SERVICE: Typing event sent to ${to} in session ${data.token}`
-                );
-
-                const chat = await whatsapp.getChatById(`${to}@c.us`);
-
-                await chat.sendStateTyping();
-
-                setTimeout(async () => {
-                  await chat.clearState();
-                }, 15000);
-              } catch (err) {
-                const errorMessage =
-                  err instanceof Error ? err.message : "Unknown error";
-
-                console.log(
-                  `WTS_SERVICE: Error sending typing event in session ${data.token}`,
-                  errorMessage
-                );
-              }
+              // not used method typing, method is deprectated
+              break;
             }
             case "update_webhook_state": {
               try {
@@ -246,6 +606,15 @@ class WtsAPISessionManager {
                     data.token
                   }`
                 );
+
+                this.socket.emit("INTERNAL:notification-web", {
+                  clientId: data.clientId,
+                  data: {
+                    type: "default",
+                    title: "WhatsApp Session",
+                    description: `Webhook atualizado de ${sessionWebhookEnabled} para ${!sessionWebhookEnabled}!`,
+                  },
+                });
 
                 sessionWebhookEnabled = !sessionWebhookEnabled;
               } catch (err) {
@@ -269,187 +638,21 @@ class WtsAPISessionManager {
         console.log("WTS_SERVICE: consumer error (session-manager)", err);
       });
 
-      console.log("WTS_SERVICE: Message consumer started:", data.token);
-    });
+      whatsapp.ev.on("creds.update", saveCreds);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-    whatsapp.on("message", async (message) => {
       console.log(
-        `WTS_SERVICE: New message received from ${
-          message.from
-        } at ${new Date().toLocaleTimeString()} | Session: ${data.token}`
+        `WTS_SERVICE: Error starting session ${data.token}`,
+        errorMessage
       );
-
-      if (sessionWebhookEnabled) {
-        if (!message.isStatus && !message.fromMe) {
-          const contact = await message.getContact();
-
-          const contactData = {
-            name: contact.pushname || "Unknown_Contact",
-            number: contact.number,
-            contactId: contact.id._serialized,
-            photo: await contact.getProfilePicUrl(),
-          };
-
-          if (message.hasMedia) {
-            // Handle message voice audio.
-            const base64Media = await message.downloadMedia();
-
-            if (base64Media.mimetype === "audio/ogg; codecs=opus") {
-              console.log(
-                `WTS_SERVICE: Send voice message to webhook for ${data.token}`
-              );
-
-              let countTry: number = 0;
-
-              while (countTry < 5) {
-                try {
-                  countTry++;
-                  console.log(
-                    `WTS_SERVICE: Attempt ${countTry} to send webhook`
-                  );
-
-                  await axios.post(
-                    data.webhook,
-                    {
-                      wts_session_token: data.token,
-                      contact: contactData,
-                      message: {
-                        id: message.id._serialized,
-                        body: base64Media.data,
-                        type: "voice",
-                        mymetype: base64Media.mimetype,
-                        timestamp: message.timestamp,
-                      },
-                    },
-                    {
-                      headers: {
-                        "Content-Type": "application/json",
-                        "User-Agent": "WTSAPI-Webhook-Client",
-                      },
-                      timeout: 5000, // Timeout after 5 seconds
-                    }
-                  );
-                  console.log(`WTS_SERVICE: Webhook sent successfully`);
-                  break; // Exit loop if successful
-                } catch (error) {
-                  const errorMessage =
-                    error instanceof Error ? error.message : "Unknown error";
-
-                  console.error(
-                    `WTS_SERVICE: Error sending webhook: ${errorMessage}`
-                  );
-
-                  if (countTry >= 5) {
-                    console.error(
-                      `WTS_SERVICE: Failed to send webhook after 5 attempts`
-                    );
-                    break; // Exit loop
-                  }
-
-                  console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                  await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
-                }
-              }
-            }
-          } else if (message.type === "chat") {
-            try {
-              console.log(
-                `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
-              );
-              let countTry: number = 0;
-              // Retry logic in case of failure
-              while (countTry < 5) {
-                try {
-                  countTry++;
-                  console.log(
-                    `WTS_SERVICE: Attempt ${countTry} to send webhook`
-                  );
-
-                  await axios.post(
-                    data.webhook,
-                    {
-                      wts_session_token: data.token,
-                      contact: contactData,
-                      message: {
-                        id: message.id._serialized,
-                        body: message.body,
-                        type: message.type,
-                        timestamp: message.timestamp,
-                      },
-                    },
-                    {
-                      headers: {
-                        "Content-Type": "application/json",
-                        "User-Agent": "WTSAPI-Webhook-Client",
-                      },
-                      timeout: 5000, // Timeout after 5 seconds
-                    }
-                  );
-                  console.log(`WTS_SERVICE: Webhook sent successfully`);
-                  break; // Exit loop if successful
-                } catch (error) {
-                  const errorMessage =
-                    error instanceof Error ? error.message : "Unknown error";
-
-                  console.error(
-                    `WTS_SERVICE: Error sending webhook: ${errorMessage}`
-                  );
-
-                  if (countTry >= 5) {
-                    console.error(
-                      `WTS_SERVICE: Failed to send webhook after 5 attempts`
-                    );
-                    break; // Exit loop
-                  }
-
-                  console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                  await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
-                }
-              }
-            } catch (err) {
-              console.log(`WTS_SERVICE: Error in sent message to webhook`);
-            }
-          }
-        }
-      }
-    });
-
-    whatsapp.on("authenticated", async (_session) => {
-      console.log("WTS_SERVICE: Session authenticated:", data.token);
-
-      this.socket.emit("INTERNAL:notification-web", {
-        clientId: data.clientId,
-        data: {
-          type: "sucess",
-          title: "WhatsApp Session",
-          description: "Session started successfully",
-        },
-      });
-
-      await this.rabbitPublisher.send("wtsapi:session_started", {
-        token: data.token,
-      });
-    });
-
-    whatsapp.on("auth_failure", async (msg) => {
-      console.log("WTS_SERVICE: Auth failure:", msg);
 
       await this.rabbitPublisher.send("wtsapi:session_auth_failure", {
         token: data.token,
       });
-    });
 
-    whatsapp.on("disconnected", async (reason) => {
-      console.log("WTS_SERVICE: Session disconnected:", reason);
-
-      await this.rabbitPublisher.send("wtsapi:session_disconnected", {
-        token: data.token,
-      });
-    });
-
-    whatsapp.initialize();
-
-    console.log("WTS_SERVICE: Session initialized:", data.token);
+      return;
+    }
   }
 }
 
