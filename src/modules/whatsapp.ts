@@ -122,7 +122,10 @@ class WtsAPISessionManager {
       );
       logger.level = "error";
 
-      const msgRetryCounterCache = new NodeCache();
+      const msgRetryCounterCache = new NodeCache({
+        // stdTTL: 0, // No expiration
+        // checkperiod: 0, // No periodic checks
+      });
 
       const rl = Readline.createInterface({
         input: process.stdin,
@@ -400,6 +403,7 @@ class WtsAPISessionManager {
                   msg.key
                 );
 
+
                 if (sessionWebhookEnabled) {
                   if (msg.message?.audioMessage) {
                     // Handle audio message
@@ -472,12 +476,11 @@ class WtsAPISessionManager {
                         }
                       }
                     }
+
+                    continue;
                   }
 
-                  if (
-                    msg.message?.conversation ||
-                    msg.message?.extendedTextMessage?.text
-                  ) {
+                  if (msg.message?.conversation) {
                     const text =
                       msg.message?.conversation ||
                       msg.message?.extendedTextMessage?.text;
@@ -541,6 +544,8 @@ class WtsAPISessionManager {
                     }
                   }
                 }
+
+                continue;
               }
             }
           } catch (err) {
