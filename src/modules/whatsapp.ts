@@ -113,14 +113,14 @@ class WtsAPISessionManager {
 
   private async onSessionStart(data: SessionExternalProps) {
     try {
-      let sessionWebhookEnabled: boolean = true;
+      let sessionWebhookEnabled: boolean = false;
       console.log("WTS_SERVICE: Starting session:", data.token);
 
       const logger = pino(
         { timestamp: () => `,"time":"${new Date().toJSON()}"` },
         pino.destination(`./${data.token}-wa-logs.txt`)
       );
-      logger.level = "trace";
+      logger.level = "error";
 
       const msgRetryCounterCache = new NodeCache();
 
