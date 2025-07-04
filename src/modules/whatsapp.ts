@@ -403,7 +403,6 @@ class WtsAPISessionManager {
                   msg.key
                 );
 
-
                 if (sessionWebhookEnabled) {
                   if (msg.message?.audioMessage) {
                     // Handle audio message
@@ -480,7 +479,7 @@ class WtsAPISessionManager {
                     continue;
                   }
 
-                  if (msg.message?.conversation) {
+                  if (msg.message?.extendedTextMessage?.text) {
                     const text =
                       msg.message?.conversation ||
                       msg.message?.extendedTextMessage?.text;
@@ -488,6 +487,7 @@ class WtsAPISessionManager {
                     console.log(
                       `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
                     );
+                    
                     let countTry: number = 0;
                     // Retry logic in case of failure
                     while (countTry < 5) {
