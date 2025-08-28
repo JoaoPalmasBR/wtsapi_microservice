@@ -15,9 +15,9 @@ jobs:
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /root/deploy/wtsapi/wtsapi_microservice
+            cd /home/ubuntu/deploy/wtsapi/wtsapi_microservice
             yarn build
             pm2 restart ecosystem.config.js
             pm2 save
@@ -38,11 +38,11 @@ jobs:
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /root/deploy/wtsapi/wtsapi_microservice
+            cd /home/ubuntu/deploy/wtsapi/wtsapi_microservice
             git pull origin main
-            rm -rf node_modules/
+            sudo rm -rf node_modules/
             yarn
 
   create_enviroment_file:
@@ -53,10 +53,10 @@ jobs:
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /root/deploy/wtsapi/wtsapi_microservice
-            cat > .env <<EOL
+            cd /home/ubuntu/deploy/wtsapi/wtsapi_microservice
+            sudo cat > .env <<EOL
             NODE_ENV=production
             RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
             EMAIL_HOST=${{ secrets.EMAIL_HOST }}
