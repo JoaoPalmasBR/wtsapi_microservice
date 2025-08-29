@@ -1,11 +1,12 @@
 import axios from "axios";
+
+import Sentry from "@sentry/node";
+
 import { Socket } from "socket.io-client";
 import { io as WebSocket } from "socket.io-client";
 import { Connection, ConsumerProps, Publisher } from "rabbitmq-client";
 
-import fs from "fs";
 import p from "child_process";
-import open from "open";
 import pino from "pino";
 
 import { Boom } from "@hapi/boom";
@@ -45,20 +46,15 @@ interface SessionExternalProps {
 class WtsAPISessionManager {
   private rabbit: Connection;
   private rabbitPublisher: Publisher;
-  private socket: Socket = WebSocket(
-    `ws://localhost:${Number(process.env.WEBSOCKET_PORT || "3007")}`,
-    { transports: ["websocket"] }
-  );
+  private socket: Socket = WebSocket(`ws://localhost:${Number(process.env.WEBSOCKET_PORT || "3007")}`, {
+    transports: ["websocket"],
+  });
 
   constructor() {
-    this.rabbit = new Connection(
-      process.env.RABBITMQ_HOST ?? "amqp://guest:guest@localhost:5672"
-    );
+    this.rabbit = new Connection(process.env.RABBITMQ_HOST ?? "amqp://guest:guest@localhost:5672");
 
     this.rabbit.on("connection", () => {
-      console.log(
-        "WTS_SERVICE: WhatsApp Worker connection successfully (re)established"
-      );
+      console.log("WTS_SERVICE: WhatsApp Worker connection successfully (re)established");
     });
 
     this.rabbitPublisher = this.rabbit.createPublisher({
@@ -82,10 +78,7 @@ class WtsAPISessionManager {
     });
 
     this.socket.on("connect", () => {
-      console.log(
-        "WTS_SERVICE: WhatsApp provider Socket connected:",
-        this.socket.id
-      );
+      console.log("WTS_SERVICE: WhatsApp provider Socket connected:", this.socket.id);
     });
 
     this.rabbit.on("error", (err) => {
@@ -132,16 +125,10 @@ class WtsAPISessionManager {
         output: process.stdout,
       });
 
-      const { state, saveCreds } = await useMultiFileAuthState(
-        `./.sessions/${data.token}`
-      );
+      const { state, saveCreds } = await useMultiFileAuthState(`./.sessions/${data.token}`);
       const { version, isLatest } = await fetchLatestBaileysVersion();
 
-      console.log(
-        `WTS_SERVICE: Using WA version ${version.join(
-          "."
-        )} | Latest: ${isLatest}`
-      );
+      console.log(`WTS_SERVICE: Using WA version ${version.join(".")} | Latest: ${isLatest}`);
 
       const whatsapp = makeWASocket({
         logger,
@@ -155,10 +142,7 @@ class WtsAPISessionManager {
         // },
       });
 
-      const sendMessageWTyping = async (
-        jid: string,
-        msg: AnyMessageContent
-      ) => {
+      const sendMessageWTyping = async (jid: string, msg: AnyMessageContent) => {
         await whatsapp.presenceSubscribe(jid);
         await delay(500);
 
@@ -178,8 +162,7 @@ class WtsAPISessionManager {
         );
 
         if (events["connection.update"]) {
-          const { connection, lastDisconnect, qr } =
-            events["connection.update"];
+          const { connection, lastDisconnect, qr } = events["connection.update"];
 
           switch (connection) {
             case "open": {
@@ -206,18 +189,12 @@ class WtsAPISessionManager {
                 },
                 async (msg) => {
                   try {
-                    const message: SendMessageDto = JSON.parse(
-                      msg.body.toString()
-                    );
+                    const message: SendMessageDto = JSON.parse(msg.body.toString());
 
                     if (message.to instanceof Array) {
-                      console.log(
-                        `WTS_SERVICE: Sending message to multiple recipients in session ${data.token}`
-                      );
+                      console.log(`WTS_SERVICE: Sending message to multiple recipients in session ${data.token}`);
                       for (const recipient of message.to) {
-                        console.log(
-                          `WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`
-                        );
+                        console.log(`WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`);
 
                         await sendMessageWTyping(`${recipient}@c.us`, {
                           text: message.body,
@@ -229,44 +206,30 @@ class WtsAPISessionManager {
                       });
                     }
                   } catch (err) {
-                    const errorMessage =
-                      err instanceof Error ? err.message : "Unknown error";
+                    const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-                    console.log(
-                      `WTS_SERVICE: Error sending message in session ${data.token}`,
-                      errorMessage
-                    );
+                    console.log(`WTS_SERVICE: Error sending message in session ${data.token}`, errorMessage);
                   }
                 }
               );
 
               subMessage.on("error", (err) => {
-                console.log(
-                  "WTS_SERVICE: Consumer rabbit error (send-message)",
-                  err
-                );
+                console.log("WTS_SERVICE: Consumer rabbit error (send-message)", err);
               });
 
               break;
             }
             case "close": {
-              const status = (lastDisconnect?.error as Boom)?.output
-                ?.statusCode;
+              const status = (lastDisconnect?.error as Boom)?.output?.statusCode;
 
-              console.log(
-                `WTS_SERVICE: Session ${data.token} closed with status: ${status}`
-              );
+              console.log(`WTS_SERVICE: Session ${data.token} closed with status: ${status}`);
 
               if (status === DisconnectReason.badSession) {
               } else if (status === DisconnectReason.connectionClosed) {
-                console.log(
-                  `WTS_SERVICE: Bad session file, please delete session: ${data.token}`
-                );
+                console.log(`WTS_SERVICE: Bad session file, please delete session: ${data.token}`);
                 this.onSessionStart(data);
               } else if (status === DisconnectReason.connectionLost) {
-                console.log(
-                  `WTS_SERVICE: Connection lost, restarting session: ${data.token}`
-                );
+                console.log(`WTS_SERVICE: Connection lost, restarting session: ${data.token}`);
                 this.onSessionStart(data);
               } else if (status === DisconnectReason.connectionReplaced) {
                 console.log(
@@ -278,8 +241,7 @@ class WtsAPISessionManager {
                   data: {
                     type: "destructive",
                     title: "WhatsApp Session",
-                    description:
-                      "Sessão desconectada porque foi aberta em outro dispositivo!",
+                    description: "Sessão desconectada porque foi aberta em outro dispositivo!",
                   },
                 });
 
@@ -288,44 +250,33 @@ class WtsAPISessionManager {
                 });
               } else if (status === DisconnectReason.loggedOut) {
                 await new Promise((resolve, reject) => {
-                  p.exec(
-                    `rm -rf ./.sessions/${data.token}`,
-                    (error, stdout, stderr) => {
-                      if (error) {
-                        console.error(
-                          `WTS_SERVICE: Error deleting session: ${error}`
-                        );
+                  p.exec(`rm -rf ./.sessions/${data.token}`, (error, stdout, stderr) => {
+                    if (error) {
+                      console.error(`WTS_SERVICE: Error deleting session: ${error}`);
 
-                        reject(error);
-                        return;
-                      }
-                      if (stderr) {
-                        console.error(`WTS_SERVICE: Error: ${stderr}`);
-                        reject(new Error(stderr));
-                        return;
-                      }
-                      console.log(`WTS_SERVICE: Session deleted`);
-                      resolve(stdout);
+                      reject(error);
+                      return;
                     }
-                  );
+                    if (stderr) {
+                      console.error(`WTS_SERVICE: Error: ${stderr}`);
+                      reject(new Error(stderr));
+                      return;
+                    }
+                    console.log(`WTS_SERVICE: Session deleted`);
+                    resolve(stdout);
+                  });
                 });
 
-                console.log(
-                  `WTS_SERVICE: Device logged out, session invalid: ${data.token}`
-                );
+                console.log(`WTS_SERVICE: Device logged out, session invalid: ${data.token}`);
 
                 await this.rabbitPublisher.send("wtsapi:session_disconnected", {
                   token: data.token,
                 });
               } else if (status === DisconnectReason.restartRequired) {
-                console.log(
-                  `WTS_SERVICE: Restart required, restarting session: ${data.token}`
-                );
+                console.log(`WTS_SERVICE: Restart required, restarting session: ${data.token}`);
                 this.onSessionStart(data);
               } else if (status === DisconnectReason.timedOut) {
-                console.log(
-                  `WTS_SERVICE: Connection timed out, restarting session: ${data.token}`
-                );
+                console.log(`WTS_SERVICE: Connection timed out, restarting session: ${data.token}`);
                 this.onSessionStart(data);
               } else {
                 console.log(
@@ -335,19 +286,13 @@ class WtsAPISessionManager {
               break;
             }
             default: {
-              console.log(
-                `WTS_SERVICE: Connection update | Session: ${data.token}`
-              );
+              console.log(`WTS_SERVICE: Connection update | Session: ${data.token}`);
               break;
             }
           }
 
           if (qr) {
-            console.log(
-              `WTS_SERVICE: QR Code generated for ${
-                data.token
-              } - ${new Date().toLocaleTimeString()}`
-            );
+            console.log(`WTS_SERVICE: QR Code generated for ${data.token} - ${new Date().toLocaleTimeString()}`);
 
             this.socket.emit("INTERNAL:qr_code", {
               clientId: data.clientId,
@@ -387,10 +332,7 @@ class WtsAPISessionManager {
                   continue;
                 }
 
-                const photoUrl = await whatsapp.profilePictureUrl(
-                  msg.key.remoteJid,
-                  "image"
-                );
+                const photoUrl = await whatsapp.profilePictureUrl(msg.key.remoteJid, "image");
 
                 const contactData: ContactDto = {
                   name: msg.pushName || "Unknown_Contact",
@@ -399,9 +341,7 @@ class WtsAPISessionManager {
                   photo: photoUrl || "",
                 };
 
-                const messageId = await whatsapp.requestPlaceholderResend(
-                  msg.key
-                );
+                const messageId = await whatsapp.requestPlaceholderResend(msg.key);
 
                 if (sessionWebhookEnabled) {
                   if (msg.message?.audioMessage) {
@@ -409,24 +349,16 @@ class WtsAPISessionManager {
                     const audioMessage = msg.message.audioMessage;
 
                     if (audioMessage.mimetype === "audio/ogg; codecs=opus") {
-                      const media = await downloadMediaMessage(
-                        msg,
-                        "buffer",
-                        {}
-                      );
+                      const media = await downloadMediaMessage(msg, "buffer", {});
 
-                      console.log(
-                        `WTS_SERVICE: Send voice message to webhook for ${data.token}`
-                      );
+                      console.log(`WTS_SERVICE: Send voice message to webhook for ${data.token}`);
 
                       let countTry: number = 0;
 
                       while (countTry < 5) {
                         try {
                           countTry++;
-                          console.log(
-                            `WTS_SERVICE: Attempt ${countTry} to send webhook`
-                          );
+                          console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
 
                           await axios.post(
                             data.webhook,
@@ -452,26 +384,17 @@ class WtsAPISessionManager {
                           console.log(`WTS_SERVICE: Webhook sent successfully`);
                           break; // Exit loop if successful
                         } catch (error) {
-                          const errorMessage =
-                            error instanceof Error
-                              ? error.message
-                              : "Unknown error";
+                          const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-                          console.error(
-                            `WTS_SERVICE: Error sending webhook: ${errorMessage}`
-                          );
+                          console.error(`WTS_SERVICE: Error sending webhook: ${errorMessage}`);
 
                           if (countTry >= 5) {
-                            console.error(
-                              `WTS_SERVICE: Failed to send webhook after 5 attempts`
-                            );
+                            console.error(`WTS_SERVICE: Failed to send webhook after 5 attempts`);
                             break; // Exit loop
                           }
 
                           console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                          await new Promise((resolve) =>
-                            setTimeout(resolve, 4000)
-                          ); // Wait 4 seconds before retrying
+                          await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
                         }
                       }
                     }
@@ -480,22 +403,16 @@ class WtsAPISessionManager {
                   }
 
                   if (msg.message?.extendedTextMessage?.text) {
-                    const text =
-                      msg.message?.conversation ||
-                      msg.message?.extendedTextMessage?.text;
+                    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
 
-                    console.log(
-                      `WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`
-                    );
-                    
+                    console.log(`WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`);
+
                     let countTry: number = 0;
                     // Retry logic in case of failure
                     while (countTry < 5) {
                       try {
                         countTry++;
-                        console.log(
-                          `WTS_SERVICE: Attempt ${countTry} to send webhook`
-                        );
+                        console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
 
                         await axios.post(
                           data.webhook,
@@ -520,26 +437,17 @@ class WtsAPISessionManager {
                         console.log(`WTS_SERVICE: Webhook sent successfully`);
                         break; // Exit loop if successful
                       } catch (error) {
-                        const errorMessage =
-                          error instanceof Error
-                            ? error.message
-                            : "Unknown error";
+                        const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-                        console.error(
-                          `WTS_SERVICE: Error sending webhook: ${errorMessage}`
-                        );
+                        console.error(`WTS_SERVICE: Error sending webhook: ${errorMessage}`);
 
                         if (countTry >= 5) {
-                          console.error(
-                            `WTS_SERVICE: Failed to send webhook after 5 attempts`
-                          );
+                          console.error(`WTS_SERVICE: Failed to send webhook after 5 attempts`);
                           break; // Exit loop
                         }
 
                         console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                        await new Promise((resolve) =>
-                          setTimeout(resolve, 4000)
-                        ); // Wait 4 seconds before retrying
+                        await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
                       }
                     }
                   }
@@ -549,13 +457,9 @@ class WtsAPISessionManager {
               }
             }
           } catch (err) {
-            const errorMessage =
-              err instanceof Error ? err.message : "Unknown error";
+            const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-            console.error(
-              `WTS_SERVICE: Error in send message to webhook in session ${data.token}`,
-              errorMessage
-            );
+            console.error(`WTS_SERVICE: Error in send message to webhook in session ${data.token}`, errorMessage);
           }
         }
       });
@@ -577,9 +481,7 @@ class WtsAPISessionManager {
           switch (dataEvent.event) {
             case "disconnect_session": {
               try {
-                console.log(
-                  `WTS_SERVICE: Disconnecting session: ${data.token}`
-                );
+                console.log(`WTS_SERVICE: Disconnecting session: ${data.token}`);
 
                 await whatsapp.logout();
 
@@ -589,13 +491,9 @@ class WtsAPISessionManager {
                   token: data.token,
                 });
               } catch (err) {
-                const errorMessage =
-                  err instanceof Error ? err.message : "Unknown error";
+                const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-                console.log(
-                  `WTS_SERVICE: Error disconnecting session ${data.token}`,
-                  errorMessage
-                );
+                console.log(`WTS_SERVICE: Error disconnecting session ${data.token}`, errorMessage);
               }
 
               break;
@@ -607,9 +505,7 @@ class WtsAPISessionManager {
             case "update_webhook_state": {
               try {
                 console.log(
-                  `WTS_SERVICE: Webhook state updated to ${!sessionWebhookEnabled} for session ${
-                    data.token
-                  }`
+                  `WTS_SERVICE: Webhook state updated to ${!sessionWebhookEnabled} for session ${data.token}`
                 );
 
                 this.socket.emit("INTERNAL:notification-web", {
@@ -623,13 +519,9 @@ class WtsAPISessionManager {
 
                 sessionWebhookEnabled = !sessionWebhookEnabled;
               } catch (err) {
-                const errorMessage =
-                  err instanceof Error ? err.message : "Unknown error";
+                const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-                console.log(
-                  `WTS_SERVICE: Error updating webhook state in session ${data.token}`,
-                  errorMessage
-                );
+                console.log(`WTS_SERVICE: Error updating webhook state in session ${data.token}`, errorMessage);
               }
               break;
             }
@@ -647,10 +539,9 @@ class WtsAPISessionManager {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-      console.log(
-        `WTS_SERVICE: Error starting session ${data.token}`,
-        errorMessage
-      );
+      console.log(`WTS_SERVICE: Error starting session ${data.token}`, errorMessage);
+
+      Sentry.captureException(err);
 
       await this.rabbitPublisher.send("wtsapi:session_auth_failure", {
         token: data.token,

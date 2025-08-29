@@ -1,3 +1,5 @@
+import "./modules/sentry";
+
 import dotenv from "dotenv";
 
 dotenv.config();

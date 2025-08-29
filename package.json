@@ -15,6 +15,7 @@
   "dependencies": {
     "@cacheable/node-cache": "^1.5.8",
     "@hapi/boom": "^10.0.1",
+    "@sentry/node": "^10.7.0",
     "axios": "^1.8.4",
     "baileys": "^6.7.18",
     "dotenv": "^16.5.0",

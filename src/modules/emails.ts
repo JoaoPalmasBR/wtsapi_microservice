@@ -1,3 +1,5 @@
+import Sentry from "@sentry/node";
+
 import Connection, { ConsumerProps } from "rabbitmq-client";
 
 import { emailTransporter } from "../libs/nodemailer";
@@ -6,11 +8,7 @@ import { emailCredentials } from "../emails-templates/email-credentials";
 import { loginWithEmailTemplate } from "../emails-templates/login-with-email";
 import { templateConfirmationAccount } from "../emails-templates/confirmation-account";
 
-import {
-  LoginUrlEmailProps,
-  CredentialsEmailProps,
-  ConfirmationAccountEmailProps,
-} from "../dtos/emails";
+import { LoginUrlEmailProps, CredentialsEmailProps, ConfirmationAccountEmailProps } from "../dtos/emails";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:email-queues",
@@ -35,18 +33,14 @@ class EmailsProcessor {
   private rabbit: Connection;
 
   constructor() {
-    this.rabbit = new Connection(
-      process.env.RABBITMQ_HOST ?? "amqp://guest:guest@localhost:5672"
-    );
+    this.rabbit = new Connection(process.env.RABBITMQ_HOST ?? "amqp://guest:guest@localhost:5672");
 
     this.rabbit.on("error", (err) => {
       console.log("WTSAPI: RabbitMQ connection error", err);
     });
 
     this.rabbit.on("connection", () => {
-      console.log(
-        "WTSAPI: Emails Worker connection successfully (re)established"
-      );
+      console.log("WTSAPI: Emails Worker connection successfully (re)established");
     });
 
     this.onInit();
@@ -56,9 +50,7 @@ class EmailsProcessor {
     const sub = this.rabbit.createConsumer(rabbitConfig, async (msg) => {
       switch (msg.routingKey) {
         case "email.confirmation":
-          const data: ConfirmationAccountEmailProps = JSON.parse(
-            msg.body.toString()
-          );
+          const data: ConfirmationAccountEmailProps = JSON.parse(msg.body.toString());
 
           if (!data.to || !data.verificationCode) {
             console.log("WTSAPI: Email confirmation data is invalid");
@@ -76,12 +68,12 @@ class EmailsProcessor {
             })
             .catch((err) => {
               console.log("WTSAPI: Error sending email", err.message);
+
+              Sentry.captureException(err);
             });
           break;
         case "email.login-url":
-          const dataLoginUrl: LoginUrlEmailProps = JSON.parse(
-            msg.body.toString()
-          );
+          const dataLoginUrl: LoginUrlEmailProps = JSON.parse(msg.body.toString());
 
           if (!dataLoginUrl.to || !dataLoginUrl.url) {
             console.log("WTSAPI: Email login url data is invalid");
@@ -99,34 +91,30 @@ class EmailsProcessor {
             })
             .catch((err) => {
               console.log("WTSAPI: Error sending email", err.message);
+
+              Sentry.captureException(err);
             });
           break;
         case "email.credentials":
-          const dataCredentials: CredentialsEmailProps = JSON.parse(
-            msg.body.toString()
-          );
+          const dataCredentials: CredentialsEmailProps = JSON.parse(msg.body.toString());
 
           if (!dataCredentials.to || !dataCredentials.clientId) {
             console.log("WTSAPI: Email credentials data is invalid");
             return;
           }
-          console.log(
-            `WTSAPI: Sending email credentials to ${dataCredentials.to}`
-          );
+          console.log(`WTSAPI: Sending email credentials to ${dataCredentials.to}`);
 
           await emailTransporter
             .sendMail({
               to: dataCredentials.to,
               subject: "Blibsend - Credenciais de acesso",
               from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
-              html: emailCredentials(
-                dataCredentials.name,
-                dataCredentials.clientId,
-                dataCredentials.clientSecret
-              ),
+              html: emailCredentials(dataCredentials.name, dataCredentials.clientId, dataCredentials.clientSecret),
             })
             .catch((err) => {
               console.log("WTSAPI: Error sending email", err.message);
+
+              Sentry.captureException(err);
             });
           break;
         default:
@@ -137,6 +125,8 @@ class EmailsProcessor {
 
     sub.on("error", (err) => {
       console.log("WTSAPI: consumer error (emails-events)", err);
+
+      Sentry.captureException(err);
     });
 
     console.log("WTSAPI: Emails queues processor is working...");
