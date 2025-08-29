@@ -1,5 +1,3 @@
-import axios from "axios";
-
 import Sentry from "@sentry/node";
 
 import { Socket } from "socket.io-client";
@@ -24,9 +22,7 @@ import makeWASocket, {
 } from "baileys";
 
 import { SendMessageDto } from "../dtos/whatsapp";
-import { DESTRUCTION } from "dns";
 import { ContactDto } from "../dtos/contact";
-import { send } from "process";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
@@ -343,114 +339,52 @@ class WtsAPISessionManager {
 
                 const messageId = await whatsapp.requestPlaceholderResend(msg.key);
 
-                if (sessionWebhookEnabled) {
-                  if (msg.message?.audioMessage) {
-                    // Handle audio message
-                    const audioMessage = msg.message.audioMessage;
+                if (msg.message?.audioMessage) {
+                  // Handle audio message
+                  const audioMessage = msg.message.audioMessage;
 
-                    if (audioMessage.mimetype === "audio/ogg; codecs=opus") {
-                      const media = await downloadMediaMessage(msg, "buffer", {});
+                  if (audioMessage.mimetype === "audio/ogg; codecs=opus") {
+                    const media = await downloadMediaMessage(msg, "buffer", {});
 
-                      console.log(`WTS_SERVICE: Send voice message to webhook for ${data.token}`);
+                    console.log(`WTS_SERVICE: Send voice message to webhook for ${data.token}`);
 
-                      let countTry: number = 0;
-
-                      while (countTry < 5) {
-                        try {
-                          countTry++;
-                          console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
-
-                          await axios.post(
-                            data.webhook,
-                            {
-                              wts_session_token: data.token.trim(),
-                              contact: contactData,
-                              message: {
-                                id: messageId,
-                                body: media.toString("base64"),
-                                type: "voice",
-                                mymetype: msg.message.audioMessage.mimetype,
-                                timestamp: msg.messageTimestamp,
-                              },
-                            },
-                            {
-                              headers: {
-                                "Content-Type": "application/json",
-                                "User-Agent": "WTSAPI-Webhook-Client",
-                              },
-                              timeout: 5000, // Timeout after 5 seconds
-                            }
-                          );
-                          console.log(`WTS_SERVICE: Webhook sent successfully`);
-                          break; // Exit loop if successful
-                        } catch (error) {
-                          const errorMessage = error instanceof Error ? error.message : "Unknown error";
-
-                          console.error(`WTS_SERVICE: Error sending webhook: ${errorMessage}`);
-
-                          if (countTry >= 5) {
-                            console.error(`WTS_SERVICE: Failed to send webhook after 5 attempts`);
-                            break; // Exit loop
-                          }
-
-                          console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                          await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
-                        }
-                      }
-                    }
-
-                    continue;
+                    await this.rabbitPublisher.send("wtsapi:send_message_to_webhook", {
+                      type: "voice",
+                      token: data.token.trim(),
+                      messageData: {
+                        contact: contactData,
+                        message: {
+                          id: messageId,
+                          body: media.toString("base64"),
+                          type: "voice",
+                          mymetype: msg.message.audioMessage.mimetype,
+                          timestamp: msg.messageTimestamp,
+                        },
+                      },
+                    });
                   }
 
-                  if (msg.message?.extendedTextMessage?.text) {
-                    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+                  continue;
+                }
 
-                    console.log(`WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`);
+                if (msg.message?.extendedTextMessage?.text) {
+                  const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
 
-                    let countTry: number = 0;
-                    // Retry logic in case of failure
-                    while (countTry < 5) {
-                      try {
-                        countTry++;
-                        console.log(`WTS_SERVICE: Attempt ${countTry} to send webhook`);
+                  console.log(`WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`);
 
-                        await axios.post(
-                          data.webhook,
-                          {
-                            wts_session_token: data.token.trim(),
-                            contact: contactData,
-                            message: {
-                              id: messageId,
-                              body: text,
-                              type: "chat",
-                              timestamp: msg.messageTimestamp,
-                            },
-                          },
-                          {
-                            headers: {
-                              "Content-Type": "application/json",
-                              "User-Agent": "WTSAPI-Webhook-Client",
-                            },
-                            timeout: 5000, // Timeout after 5 seconds
-                          }
-                        );
-                        console.log(`WTS_SERVICE: Webhook sent successfully`);
-                        break; // Exit loop if successful
-                      } catch (error) {
-                        const errorMessage = error instanceof Error ? error.message : "Unknown error";
-
-                        console.error(`WTS_SERVICE: Error sending webhook: ${errorMessage}`);
-
-                        if (countTry >= 5) {
-                          console.error(`WTS_SERVICE: Failed to send webhook after 5 attempts`);
-                          break; // Exit loop
-                        }
-
-                        console.log(`WTS_SERVICE: Retrying in 2 seconds...`);
-                        await new Promise((resolve) => setTimeout(resolve, 4000)); // Wait 4 seconds before retrying
-                      }
-                    }
-                  }
+                  await this.rabbitPublisher.send("wtsapi:send_message_to_webhook", {
+                    type: "chat",
+                    token: data.token.trim(),
+                    messageData: {
+                      contact: contactData,
+                      message: {
+                        id: messageId,
+                        body: text,
+                        type: "chat",
+                        timestamp: msg.messageTimestamp,
+                      },
+                    },
+                  });
                 }
 
                 continue;
