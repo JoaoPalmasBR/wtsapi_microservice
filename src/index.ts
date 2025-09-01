@@ -1,4 +1,4 @@
-import "./modules/sentry";
+import "./libs/sentry";
 
 import dotenv from "dotenv";
 
