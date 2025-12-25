@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "wtsapi.microservice",
-      script: "yarn start:prod",
+      script: "pnpm start:prod",
       max_memory_restart: "450M",
       env: {
         NODE_ENV: "production",
