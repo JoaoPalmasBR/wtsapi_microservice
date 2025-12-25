@@ -58,12 +58,12 @@ jobs:
             cd /root/blibsend/wtsapi_microservice
             sudo cat > .env <<EOL
             NODE_ENV=production
-            WEBSOCKET_PORT=${{ secrets.WTSAPI_WEBSOCKET_PORT }}
-            RABBITMQ_HOST=${{ secrets.WTSAPI_RABBITMQ_HOST }}
-            REDIS_HOST=${{ secrets.WTSAPI_REDIS_HOST }}
-            REDIS_PORT=${{ secrets.WTSAPI_REDIS_PORT }}
-            EMAIL_HOST=${{ secrets.WTSAPI_EMAIL_HOST }}
-            EMAIL_PORT=${{ secrets.WTSAPI_EMAIL_PORT }}
-            EMAIL_HOST_USER=${{ secrets.WTSAPI_EMAIL_HOST_USER }}
-            EMAIL_HOST_PASSWORD=${{ secrets.WTSAPI_EMAIL_HOST_PASSWORD }}
+            WEBSOCKET_PORT=${{ secrets.WEBSOCKET_PORT }}
+            RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
+            REDIS_HOST=${{ secrets.REDIS_HOST }}
+            REDIS_PORT=${{ secrets.REDIS_PORT }}
+            EMAIL_HOST=${{ secrets.EMAIL_HOST }}
+            EMAIL_PORT=${{ secrets.EMAIL_PORT }}
+            EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
+            EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
             EOL
