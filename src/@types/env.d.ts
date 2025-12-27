@@ -9,6 +9,8 @@ declare global {
       EMAIL_PORT: number;
       EMAIL_USER: string;
       EMAIL_PASS: string;
+      RESEND_API_KEY: string;
+      RESEND_EMAIL_FROM: string;
     }
   }
 }

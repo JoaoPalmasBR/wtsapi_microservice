@@ -2,7 +2,8 @@ import Sentry from "@sentry/node";
 
 import Connection, { ConsumerProps } from "rabbitmq-client";
 
-import { emailTransporter } from "../libs/nodemailer";
+import { resend } from "../libs/resend";
+// import { emailTransporter } from "../libs/nodemailer";
 
 import { emailCredentials } from "../emails-templates/email-credentials";
 import { loginWithEmailTemplate } from "../emails-templates/login-with-email";
@@ -49,7 +50,7 @@ class EmailsProcessor {
   private async onInit() {
     const sub = this.rabbit.createConsumer(rabbitConfig, async (msg) => {
       switch (msg.routingKey) {
-        case "email.confirmation":
+        case "email.confirmation": {
           const data: ConfirmationAccountEmailProps = JSON.parse(msg.body.toString());
 
           if (!data.to || !data.verificationCode) {
@@ -59,20 +60,23 @@ class EmailsProcessor {
 
           console.log(`WTSAPI: Sending email confirmation to ${data.to}`);
 
-          await emailTransporter
-            .sendMail({
-              to: data.to,
-              subject: "Blibsend - Confirmação de conta",
-              from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
-              html: templateConfirmationAccount(data.to, data.verificationCode),
-            })
-            .catch((err) => {
-              console.log("WTSAPI: Error sending email", err.message);
+          const { error } = await resend.emails.send({
+            from: process.env.RESEND_EMAIL_FROM!,
+            to: data.to,
+            subject: "Blibsend - Confirmação de conta",
+            html: templateConfirmationAccount(data.to, data.verificationCode),
+          });
 
-              Sentry.captureException(err);
-            });
+          if (error) {
+            console.log("WTSAPI: Error sending email via Resend", error.message);
+            Sentry.captureException(error);
+          } else {
+            console.log(`WTSAPI: Email confirmation sent to ${data.to} via Resend`);
+          }
+
           break;
-        case "email.login-url":
+        }
+        case "email.login-url": {
           const dataLoginUrl: LoginUrlEmailProps = JSON.parse(msg.body.toString());
 
           if (!dataLoginUrl.to || !dataLoginUrl.url) {
@@ -82,20 +86,23 @@ class EmailsProcessor {
 
           console.log(`WTSAPI: Sending email login url to ${dataLoginUrl.to}`);
 
-          await emailTransporter
-            .sendMail({
-              to: dataLoginUrl.to,
-              subject: "Blibsend - Link de acesso",
-              from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
-              html: loginWithEmailTemplate(dataLoginUrl.url, dataLoginUrl.to),
-            })
-            .catch((err) => {
-              console.log("WTSAPI: Error sending email", err.message);
+          const { error } = await resend.emails.send({
+            from: process.env.RESEND_EMAIL_FROM!,
+            to: dataLoginUrl.to,
+            subject: "Blibsend - Link de acesso",
+            html: loginWithEmailTemplate(dataLoginUrl.url, dataLoginUrl.to),
+          });
 
-              Sentry.captureException(err);
-            });
+          if (error) {
+            console.log("WTSAPI: Error sending email via Resend", error.message);
+            Sentry.captureException(error);
+          } else {
+            console.log(`WTSAPI: Email login url sent to ${dataLoginUrl.to} via Resend`);
+          }
+
           break;
-        case "email.credentials":
+        }
+        case "email.credentials": {
           const dataCredentials: CredentialsEmailProps = JSON.parse(msg.body.toString());
 
           if (!dataCredentials.to || !dataCredentials.clientId) {
@@ -104,19 +111,22 @@ class EmailsProcessor {
           }
           console.log(`WTSAPI: Sending email credentials to ${dataCredentials.to}`);
 
-          await emailTransporter
-            .sendMail({
-              to: dataCredentials.to,
-              subject: "Blibsend - Credenciais de acesso",
-              from: `Blibsend <${process.env.EMAIL_HOST_USER}>`,
-              html: emailCredentials(dataCredentials.name, dataCredentials.clientId, dataCredentials.clientSecret),
-            })
-            .catch((err) => {
-              console.log("WTSAPI: Error sending email", err.message);
+          const { error } = await resend.emails.send({
+            from: process.env.RESEND_EMAIL_FROM!,
+            to: dataCredentials.to,
+            subject: "Blibsend - Credenciais de acesso",
+            html: emailCredentials(dataCredentials.name, dataCredentials.clientId, dataCredentials.clientSecret),
+          });
 
-              Sentry.captureException(err);
-            });
+          if (error) {
+            console.log("WTSAPI: Error sending email via Resend", error.message);
+            Sentry.captureException(error);
+          } else {
+            console.log(`WTSAPI: Email credentials sent to ${dataCredentials.to} via Resend`);
+          }
+
           break;
+        }
         default:
           console.log("WTSAPI: Received unknown email type");
           break;

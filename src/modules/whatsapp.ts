@@ -10,7 +10,6 @@ import { Boom } from "@hapi/boom";
 
 import makeWASocket, {
   delay,
-  Browsers,
   DisconnectReason,
   AnyMessageContent,
   downloadMediaMessage,
@@ -146,10 +145,24 @@ class WtsAPISessionManager {
               countRetryConnect = 0;
               console.log(`WTS_SERVICE: Session ${data.token} is now open`);
 
+              this.socket.emit("INTERNAL:session:socket", {
+                clientId: data.clientId,
+                data: {
+                  type: "session_updated",
+                  metadata: {
+                    notify: {
+                      type: "success",
+                      title: "WhatsApp Session",
+                      description: "Sessão do whatsapp iniciada com sucesso!",
+                    },
+                  },
+                },
+              });
+
               this.socket.emit("INTERNAL:notification-web", {
                 clientId: data.clientId,
                 data: {
-                  type: "sucess",
+                  type: "success",
                   title: "WhatsApp Session",
                   description: "Sessão do whatsapp iniciada com sucesso!",
                 },
@@ -215,9 +228,9 @@ class WtsAPISessionManager {
           if (qr) {
             console.log(`WTS_SERVICE: QR Code generated for ${data.token} - ${new Date().toLocaleTimeString()}`);
 
-            this.socket.emit("INTERNAL:qr_code", {
+            this.socket.emit("INTERNAL:session:socket", {
               clientId: data.clientId,
-              data: { qr: qr },
+              data: { type: "qr_code", metadata: { qrCode: qr } },
             });
           }
         }

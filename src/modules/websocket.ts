@@ -8,10 +8,10 @@ import { Server } from "socket.io";
     io.on("connection", (socket) => {
       console.log("WTSAPI: Socket started:", socket.id);
 
-      socket.on("INTERNAL:qr_code", (payload) => {
-        console.log("WTSAPI: Received qrcode event, re-emitting to all clients");
+      socket.on("INTERNAL:session:socket", (payload) => {
+        console.log("WTSAPI: Received session:socket event, re-emitting to all clients");
 
-        io.emit("WTSAPI:wts_qrcode", payload);
+        io.emit("WTSAPI:session:socket", payload);
       });
 
       socket.on("INTERNAL:notification-web", (payload) => {
