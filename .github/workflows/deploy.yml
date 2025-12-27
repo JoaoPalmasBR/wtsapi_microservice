@@ -66,4 +66,6 @@ jobs:
             EMAIL_PORT=${{ secrets.EMAIL_PORT }}
             EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
             EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            RESEND_EMAIL_FROM=${{ secrets.RESEND_EMAIL_FROM }}
             EOL
