@@ -1,7 +1,7 @@
 import Sentry from "@sentry/node";
 import { Server } from "socket.io";
 
-(function (){
+(function () {
   try {
     const io = new Server({ cors: { origin: "*" } });
 
@@ -11,13 +11,14 @@ import { Server } from "socket.io";
       socket.on("INTERNAL:session:socket", (payload) => {
         console.log("WTSAPI: Received session:socket event, re-emitting to all clients");
 
-        io.emit("WTSAPI:session:socket", payload);
+        // io.emit("WTSAPI:session:socket", payload);
+        io.emit(`${payload.clientId}:session:socket`, payload);
       });
 
       socket.on("INTERNAL:notification-web", (payload) => {
         console.log("WTSAPI: Received notification-web event, re-emitting to all clients");
 
-        io.emit("WTSAPI:notification-to-front", payload);
+        io.emit(`${payload.clientId}:notification-web`, payload);
       });
 
       socket.on("connect", () => {
@@ -35,4 +36,4 @@ import { Server } from "socket.io";
   } catch (e) {
     Sentry.captureException(e);
   }
-})()
+})();
