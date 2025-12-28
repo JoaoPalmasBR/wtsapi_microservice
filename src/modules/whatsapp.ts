@@ -384,7 +384,6 @@ class WtsAPISessionManager {
                   `WTS_SERVICE: Webhook state updated to ${!sessionWebhookEnabled} for session ${data.token}`
                 );
 
-                const statusText = (status: boolean) => (status ? "Ativo" : "Desativado");
 
                 this.socket.emit("INTERNAL:notification-web", {
                   clientId: data.clientId,
@@ -392,9 +391,9 @@ class WtsAPISessionManager {
                     type: "notification_web",
                     metadata: {
                       notify: {
-                        type: "success",
+                        type: sessionWebhookEnabled ? "warning" : "success",
                         title: "WhatsApp Session",
-                        description: `Webhook atualizado de ${statusText(sessionWebhookEnabled)} para ${statusText(!sessionWebhookEnabled)}!`,
+                        description: `Webhook ${sessionWebhookEnabled ? "desativado" : "ativado"} com sucesso!`,
                       },
                     },
                   },
