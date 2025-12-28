@@ -162,9 +162,14 @@ class WtsAPISessionManager {
               this.socket.emit("INTERNAL:notification-web", {
                 clientId: data.clientId,
                 data: {
-                  type: "success",
-                  title: "WhatsApp Session",
-                  description: "Sessão do whatsapp iniciada com sucesso!",
+                  type: "notification_web",
+                  metadata: {
+                    notify: {
+                      type: "success",
+                      title: "WhatsApp Session",
+                      description: "Sessão do whatsapp iniciada com sucesso!",
+                    },
+                  },
                 },
               });
 
@@ -278,7 +283,6 @@ class WtsAPISessionManager {
                 const messageId = await whatsapp.requestPlaceholderResend(msg.key);
 
                 if (msg.message?.audioMessage) {
-                  // Handle audio message
                   const audioMessage = msg.message.audioMessage;
 
                   if (audioMessage.mimetype === "audio/ogg; codecs=opus") {
@@ -380,12 +384,19 @@ class WtsAPISessionManager {
                   `WTS_SERVICE: Webhook state updated to ${!sessionWebhookEnabled} for session ${data.token}`
                 );
 
+                const statusText = (status: boolean) => (status ? "Ativo" : "Desativado");
+
                 this.socket.emit("INTERNAL:notification-web", {
                   clientId: data.clientId,
                   data: {
-                    type: "default",
-                    title: "WhatsApp Session",
-                    description: `Webhook atualizado de ${sessionWebhookEnabled} para ${!sessionWebhookEnabled}!`,
+                    type: "notification_web",
+                    metadata: {
+                      notify: {
+                        type: "success",
+                        title: "WhatsApp Session",
+                        description: `Webhook atualizado de ${statusText(sessionWebhookEnabled)} para ${statusText(!sessionWebhookEnabled)}!`,
+                      },
+                    },
                   },
                 });
 

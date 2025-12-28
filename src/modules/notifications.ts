@@ -12,10 +12,16 @@ const rabbitConfig: ConsumerProps = {
 
 interface NotificationMsgProps {
   clientId: string;
-  type: "destructive" | "default";
-  title: string;
-  description: string;
-  duration: number;
+  data: {
+    type: "notification_web";
+    metadata: {
+      notify: {
+        type: "info" | "success" | "warning" | "error";
+        title: string;
+        description: string;
+      };
+    };
+  };
 }
 
 new (class NotificationService {
@@ -51,11 +57,16 @@ new (class NotificationService {
 
       this.socket.emit("INTERNAL:notification-web", {
         clientId: data.clientId,
-        msg: {
-          type: data.type,
-          title: data.title,
-          description: data.description,
-          duration: data.duration,
+        data: {
+          type: data.data.type,
+          metadata: {
+            notify: {
+              type: data.data.metadata.notify.type,
+              title: data.data.metadata.notify.title,
+              description: data.data.metadata.notify.description,
+              duration: 5000,
+            },
+          },
         },
       });
     });
