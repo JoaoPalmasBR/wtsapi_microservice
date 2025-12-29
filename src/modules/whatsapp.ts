@@ -218,12 +218,57 @@ class WtsAPISessionManager {
               break;
             }
             case "close": {
-              if (status !== DisconnectReason.loggedOut) {
-                countRetryConnect += 1;
+              switch (status) {
+                case DisconnectReason.badSession:
+                  console.log(
+                    `WTS_SERVICE: Bad session file, please delete session and scan again | Session: ${data.token}`
+                  );
+                  countRetryConnect += 1;
 
-                console.log(`WTS_SERVICE: Reconnecting session ${data.token} | Attempt: ${countRetryConnect}`);
-                this.onSessionStart(data);
+                  this.onSessionStart(data);
+                  break;
+                case DisconnectReason.connectionClosed:
+                  console.log(`WTS_SERVICE: Connection closed, reconnecting... | Session: ${data.token}`);
+                  countRetryConnect += 1;
+
+                  this.onSessionStart(data);
+                  break;
+                case DisconnectReason.connectionLost:
+                  console.log(`WTS_SERVICE: Connection lost from WhatsApp, reconnecting... | Session: ${data.token}`);
+                  countRetryConnect += 1;
+
+                  this.onSessionStart(data);
+                  break;
+                case DisconnectReason.connectionReplaced:
+                  console.log(
+                    `WTS_SERVICE: Connection replaced by another session, logging out... | Session: ${data.token}`
+                  );
+                  break;
+                case DisconnectReason.loggedOut:
+                  console.log(`WTS_SERVICE: Device logged out, please scan again | Session: ${data.token}`);
+                  break;
+                case DisconnectReason.restartRequired:
+                  console.log(`WTS_SERVICE: Restart required, restarting... | Session: ${data.token}`);
+                  countRetryConnect += 1;
+
+                  this.onSessionStart(data);
+                  break;
+                case DisconnectReason.multideviceMismatch:
+                  console.log(`WTS_SERVICE: Connection timeout, reconnecting... | Session: ${data.token}`);
+                  countRetryConnect += 1;
+
+                  this.onSessionStart(data);
+                  break;
+                default:
+                  console.log(
+                    `WTS_SERVICE: Unknown disconnect reason: ${status}| Session: ${data.token}, reconnecting...`
+                  );
+                  countRetryConnect += 1;
+
+                  this.onSessionStart(data);
+                  break;
               }
+
               break;
             }
             default: {
