@@ -1,3 +1,5 @@
+import fs from "fs/promises";
+import path from "path";
 import Sentry from "@sentry/node";
 
 import { Socket } from "socket.io-client";
@@ -53,6 +55,7 @@ class WtsAPISessionManager {
         { queue: "wtsapi:session_auth_failure", durable: true },
         { queue: "wtsapi:session_disconnected", durable: true },
         { queue: "wtsapi:disable_all_sessions", durable: true },
+        { queue: "wtsapi:send_message_to_webhook", durable: true },
       ],
       confirm: true,
       maxAttempts: 2,
@@ -96,7 +99,6 @@ class WtsAPISessionManager {
   private async onSessionStart(data: SessionExternalProps) {
     try {
       let countRetryConnect = 0;
-      let sessionWebhookEnabled: boolean = false;
       console.log("WTS_SERVICE: Starting session:", data.token);
 
       const logger = pino(
@@ -225,7 +227,9 @@ class WtsAPISessionManager {
               break;
             }
             default: {
-              console.log(`WTS_SERVICE: Connection update | Session: ${data.token}`);
+              console.log(
+                `WTS_SERVICE: Connection update | Session: ${data.token} | Status: ${connection} | Reason: ${status}`
+              );
               break;
             }
           }
@@ -248,7 +252,9 @@ class WtsAPISessionManager {
             if (upsert.type === "notify") {
               for (const msg of upsert.messages) {
                 console.log(
-                  `WTS_SERVICE: New message received from ${msg.key.remoteJid} at ${time} | Session: ${data.token} `
+                  `WTS_SERVICE: New message received type ${msg.message?.conversation ? "text" : "unknown"} from ${
+                    msg.key.remoteJid
+                  } at ${time} | Session: ${data.token} `
                 );
 
                 if (msg.key.fromMe || !msg.key.remoteJid || !msg.message) {
@@ -309,7 +315,7 @@ class WtsAPISessionManager {
                   continue;
                 }
 
-                if (msg.message?.extendedTextMessage?.text) {
+                if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
                   const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
 
                   console.log(`WTS_SERVICE: Send message to webhook: ${data.webhook} |> ${data.token}`);
@@ -366,6 +372,35 @@ class WtsAPISessionManager {
                 await this.rabbitPublisher.send("wtsapi:session_disconnected", {
                   token: data.token,
                 });
+
+                const sessionsDir = path.resolve(process.cwd(), "sessions");
+                const sessionPath = path.join(sessionsDir, data.token);
+
+                fs.rm(sessionPath, { recursive: true, force: true })
+                  .then(() => {
+                    console.log(`WTS_SERVICE: Session files removed for ${data.token}`);
+                  })
+                  .catch((err) => {
+                    console.log(`WTS_SERVICE: Error removing session files for ${data.token}`, err);
+                  });
+
+                console.log(`WTS_SERVICE: Removing session files for ${data.token}`);
+
+                this.socket.emit("INTERNAL:notification-web", {
+                  clientId: data.clientId,
+                  data: {
+                    type: "notification_web",
+                    metadata: {
+                      notify: {
+                        type: "warning",
+                        title: "WhatsApp Session",
+                        description: "Sessão do whatsapp desconectada com sucesso!",
+                      },
+                    },
+                  },
+                });
+
+                await whatsapp.logout();
               } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
@@ -376,35 +411,6 @@ class WtsAPISessionManager {
             }
             case "send_typing_event": {
               // not used method typing, method is deprectated
-              break;
-            }
-            case "update_webhook_state": {
-              try {
-                console.log(
-                  `WTS_SERVICE: Webhook state updated to ${!sessionWebhookEnabled} for session ${data.token}`
-                );
-
-
-                this.socket.emit("INTERNAL:notification-web", {
-                  clientId: data.clientId,
-                  data: {
-                    type: "notification_web",
-                    metadata: {
-                      notify: {
-                        type: sessionWebhookEnabled ? "warning" : "success",
-                        title: "WhatsApp Session",
-                        description: `Webhook ${sessionWebhookEnabled ? "desativado" : "ativado"} com sucesso!`,
-                      },
-                    },
-                  },
-                });
-
-                sessionWebhookEnabled = !sessionWebhookEnabled;
-              } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : "Unknown error";
-
-                console.log(`WTS_SERVICE: Error updating webhook state in session ${data.token}`, errorMessage);
-              }
               break;
             }
             default:
