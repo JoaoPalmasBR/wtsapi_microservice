@@ -1,4 +1,4 @@
-export const loginWithEmailTemplate = (url: string, email: string) => `
+export const loginWithEmailTemplate = (code: string, url: string, email: string) => `
 <table
   align="center"
   width="100%"
@@ -82,8 +82,7 @@ export const loginWithEmailTemplate = (url: string, email: string) => `
           <tbody>
             <tr>
               <td>
-                <a
-                  href="${url}"
+                <span
                   style="
                     color: rgb(255, 255, 255);
                     text-decoration: none;
@@ -94,13 +93,14 @@ export const loginWithEmailTemplate = (url: string, email: string) => `
                     padding-top: 0.75rem;
                     padding-bottom: 0.75rem;
                     text-align: center;
-                    font-size: 12px;
+                    font-size: 14px;
                     font-weight: 600;
                     text-decoration-line: none;
                   "
                   target="_blank"
-                  >Acessar Blibsend</a
                 >
+                  ${code}
+                </span>
               </td>
             </tr>
           </tbody>
