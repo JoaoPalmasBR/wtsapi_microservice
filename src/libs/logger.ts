@@ -1,27 +1,35 @@
-import pino from "pino"
+import pino from "pino";
 
-
-const logger = pino({
-  level: process.env.LOG_LEVEL || "info",
-  formatters: {
-    level(label) {
-      return { level: label };
+export const logger = pino({
+  transport: {
+    target: "pino-pretty",
+    options: {
+      colorize: true,
+      singleLine: true,
+      ignore: "pid,hostname",
+      // translateTime: "SYS:standard",
     },
   },
 });
 
-export const logInfo = (message: string, ...args: any[]) => {
-  logger.info({ msg: message, args });
-}
+export const logError = (message: string, error: Error | unknown) => {
+  if (error instanceof Error) {
+    logger.error({ message, error: error.message, stack: error.stack });
+  } else {
+    logger.error({ message, error });
+  }
+};
 
-export const logWarn = (message: string, ...args: any[]) => {
-  logger.warn({ msg: message, args });
-}
+export const logInfo = (message: string, data?: any) => {
+  logger.info({ message, data });
+};
 
-export const logError = (message: string, ...args: any[]) => {
-  logger.error({ msg: message, args });
-}
+export const logDebug = (message: string, data?: any) => {
+  logger.debug({ message, data });
+};
 
-
+export const logWarn = (message: string, data?: any) => {
+  logger.warn({ message, data });
+};
 
 export default logger;

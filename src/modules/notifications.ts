@@ -3,6 +3,7 @@ import Sentry from "@sentry/node";
 import { Socket } from "socket.io-client";
 import { io as WebSocket } from "socket.io-client";
 import { ConsumerProps, Connection } from "rabbitmq-client";
+import { logError, logInfo } from "../libs/logger";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:notifications-web",
@@ -35,11 +36,11 @@ new (class NotificationService {
     this.rabbit = new Connection(process.env.RABBITMQ_HOST ?? "amqp://guest:guest@localhost:5672");
 
     this.rabbit.on("connection", () => {
-      console.log("WTS_SERVICE: WhatsApp Worker connection successfully (re)established");
+      logInfo("WTS_SERVICE: WhatsApp Worker connection successfully (re)established");
     });
 
     this.rabbit.on("error", (err) => {
-      console.log("WTS_SERVICE: RabbitMQ connection error", err);
+      logError("WTS_SERVICE: RabbitMQ connection error", err);
 
       Sentry.captureException(err);
     });
@@ -52,7 +53,7 @@ new (class NotificationService {
       const data: NotificationMsgProps = JSON.parse(msg.body.toString());
 
       this.socket.on("connect", () => {
-        console.log("WTS_SERVICE: Notification provider Socket connected:", this.socket.id);
+        logInfo("WTS_SERVICE: Notification provider Socket connected:", this.socket.id);
       });
 
       this.socket.emit("INTERNAL:notification-web", {
@@ -72,11 +73,11 @@ new (class NotificationService {
     });
 
     sub.on("error", (err) => {
-      console.log("WTS_SERVICE: consumer error (notification-events)", err);
+      logInfo("WTS_SERVICE: consumer error (notification-events)", err);
 
       Sentry.captureException(err);
     });
 
-    console.log("WTS_SERVICE: Notification Worker running...");
+    logInfo("WTS_SERVICE: Notification Worker running...");
   }
 })();
