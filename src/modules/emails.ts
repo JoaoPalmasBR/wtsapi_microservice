@@ -13,9 +13,10 @@ import { LoginUrlEmailProps, CredentialsEmailProps, ConfirmationAccountEmailProp
 import { logInfo } from "../libs/logger";
 
 const rabbitConfig: ConsumerProps = {
+  qos: { prefetchCount: 5 },
+  noAck: false,
   queue: "wtsapi:email-queues",
   queueOptions: { durable: true },
-  qos: { prefetchCount: 5 },
   exchanges: [
     {
       exchange: "email-events",
@@ -29,6 +30,8 @@ const rabbitConfig: ConsumerProps = {
     { exchange: "email-events", routingKey: "email.credentials" },
     { exchange: "email-events", routingKey: "email.*" },
   ],
+  requeue: true,
+  arguments: { "x-max-priority": 10, "x-message-ttl": 30000, "x-dead-letter-exchange": "events.main" },
 };
 
 class EmailsProcessor {

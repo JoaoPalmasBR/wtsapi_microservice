@@ -23,7 +23,9 @@ import logger, { logError, logInfo } from "../libs/logger";
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
   queueOptions: { durable: true },
-  qos: { prefetchCount: 2 },
+  qos: { prefetchCount: 5 },
+  requeue: true,
+  arguments: { "x-max-priority": 10 },
 };
 
 interface SessionExternalProps {
