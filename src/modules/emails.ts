@@ -10,6 +10,7 @@ import { loginWithEmailTemplate } from "../emails-templates/login-with-email";
 import { templateConfirmationAccount } from "../emails-templates/confirmation-account";
 
 import { LoginUrlEmailProps, CredentialsEmailProps, ConfirmationAccountEmailProps } from "../dtos/emails";
+import { logInfo } from "../libs/logger";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:email-queues",
@@ -37,11 +38,11 @@ class EmailsProcessor {
     this.rabbit = new Connection(process.env.RABBITMQ_HOST ?? "amqp://guest:guest@localhost:5672");
 
     this.rabbit.on("error", (err) => {
-      console.log("WTSAPI: RabbitMQ connection error", err);
+      logInfo("WTSAPI: RabbitMQ connection error", err);
     });
 
     this.rabbit.on("connection", () => {
-      console.log("WTSAPI: Emails Worker connection successfully (re)established");
+      logInfo("WTSAPI: Emails Worker connection successfully (re)established");
     });
 
     this.onInit();
@@ -54,11 +55,11 @@ class EmailsProcessor {
           const data: ConfirmationAccountEmailProps = JSON.parse(msg.body.toString());
 
           if (!data.to || !data.verificationCode) {
-            console.log("WTSAPI: Email confirmation data is invalid");
+            logInfo("WTSAPI: Email confirmation data is invalid");
             return;
           }
 
-          console.log(`WTSAPI: Sending email confirmation to ${data.to}`);
+          logInfo(`WTSAPI: Sending email confirmation to ${data.to}`);
 
           const { error } = await resend.emails.send({
             from: process.env.RESEND_EMAIL_FROM!,
@@ -68,10 +69,10 @@ class EmailsProcessor {
           });
 
           if (error) {
-            console.log("WTSAPI: Error sending email via Resend", error.message);
+            logInfo("WTSAPI: Error sending email via Resend", error.message);
             Sentry.captureException(error);
           } else {
-            console.log(`WTSAPI: Email confirmation sent to ${data.to} via Resend`);
+            logInfo(`WTSAPI: Email confirmation sent to ${data.to} via Resend`);
           }
 
           break;
@@ -80,11 +81,11 @@ class EmailsProcessor {
           const dataLoginUrl: LoginUrlEmailProps = JSON.parse(msg.body.toString());
 
           if (!dataLoginUrl.to || !dataLoginUrl.url) {
-            console.log("WTSAPI: Email login url data is invalid");
+            logInfo("WTSAPI: Email login url data is invalid");
             return;
           }
 
-          console.log(`WTSAPI: Sending email login url to ${dataLoginUrl.to}`);
+          logInfo(`WTSAPI: Sending email login url to ${dataLoginUrl.to}`);
 
           const { error } = await resend.emails.send({
             from: process.env.RESEND_EMAIL_FROM!,
@@ -94,10 +95,10 @@ class EmailsProcessor {
           });
 
           if (error) {
-            console.log("WTSAPI: Error sending email via Resend", error.message);
+            logInfo("WTSAPI: Error sending email via Resend", error.message);
             Sentry.captureException(error);
           } else {
-            console.log(`WTSAPI: Email login url sent to ${dataLoginUrl.to} via Resend`);
+            logInfo(`WTSAPI: Email login url sent to ${dataLoginUrl.to} via Resend`);
           }
 
           break;
@@ -106,10 +107,10 @@ class EmailsProcessor {
           const dataCredentials: CredentialsEmailProps = JSON.parse(msg.body.toString());
 
           if (!dataCredentials.to || !dataCredentials.clientId) {
-            console.log("WTSAPI: Email credentials data is invalid");
+            logInfo("WTSAPI: Email credentials data is invalid");
             return;
           }
-          console.log(`WTSAPI: Sending email credentials to ${dataCredentials.to}`);
+          logInfo(`WTSAPI: Sending email credentials to ${dataCredentials.to}`);
 
           const { error } = await resend.emails.send({
             from: process.env.RESEND_EMAIL_FROM!,
@@ -119,27 +120,27 @@ class EmailsProcessor {
           });
 
           if (error) {
-            console.log("WTSAPI: Error sending email via Resend", error.message);
+            logInfo("WTSAPI: Error sending email via Resend", error.message);
             Sentry.captureException(error);
           } else {
-            console.log(`WTSAPI: Email credentials sent to ${dataCredentials.to} via Resend`);
+            logInfo(`WTSAPI: Email credentials sent to ${dataCredentials.to} via Resend`);
           }
 
           break;
         }
         default:
-          console.log("WTSAPI: Received unknown email type");
+          logInfo("WTSAPI: Received unknown email type");
           break;
       }
     });
 
     sub.on("error", (err) => {
-      console.log("WTSAPI: consumer error (emails-events)", err);
+      logInfo("WTSAPI: consumer error (emails-events)", err);
 
       Sentry.captureException(err);
     });
 
-    console.log("WTSAPI: Emails queues processor is working...");
+    logInfo("WTSAPI: Emails queues processor is working...");
   }
 }
 
