@@ -90,7 +90,7 @@ class EmailsProcessor {
             from: process.env.RESEND_EMAIL_FROM!,
             to: dataLoginUrl.to,
             subject: "Blibsend - Link de acesso",
-            html: loginWithEmailTemplate(dataLoginUrl.url, dataLoginUrl.to),
+            html: loginWithEmailTemplate(dataLoginUrl.code, dataLoginUrl.url, dataLoginUrl.to),
           });
 
           if (error) {

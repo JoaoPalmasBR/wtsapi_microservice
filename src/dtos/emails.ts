@@ -8,6 +8,7 @@ export interface LoginUrlEmailProps {
   to: string;
   name: string;
   url: string;
+  code: string;
 }
 
 export interface CredentialsEmailProps {
