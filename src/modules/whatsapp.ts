@@ -83,6 +83,8 @@ class WtsAPISessionManager {
     const sub = this.rabbit.createConsumer(rabbitConfig, async (msg) => {
       const data = JSON.parse(msg.body.toString()) as SessionExternalProps;
 
+      logInfo(`WTS_SERVICE: Received session start request for token: ${data.token}`);
+
       this.onSessionStart(data);
     });
 
@@ -98,7 +100,7 @@ class WtsAPISessionManager {
   private async onSessionStart(data: SessionExternalProps) {
     try {
       let countRetryConnect = 0;
-      logInfo("WTS_SERVICE: Starting session:", data.token);
+      logInfo(`WTS_SERVICE: Starting WhatsApp session for token: ${data.token}`);
 
       logger.level = "error";
 
@@ -138,7 +140,7 @@ class WtsAPISessionManager {
           switch (connection) {
             case "open": {
               countRetryConnect = 0;
-              logInfo(`WTS_SERVICE: Session ${data.token} is now open`);
+              logInfo(`WTS_SERVICE: WhatsApp connected successfully | Session: ${data.token}`);
 
               this.socket.emit("INTERNAL:session:socket", {
                 clientId: data.clientId,
