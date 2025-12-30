@@ -296,12 +296,6 @@ class WtsAPISessionManager {
 
             if (upsert.type === "notify") {
               for (const msg of upsert.messages) {
-                console.log(
-                  `WTS_SERVICE: New message received type ${msg.message?.conversation ? "text" : "unknown"} from ${
-                    msg.key.remoteJid
-                  } at ${time} | Session: ${data.token} `
-                );
-
                 if (msg.key.fromMe || !msg.key.remoteJid || !msg.message) {
                   console.log(
                     `WTS_SERVICE: Ignoring message (from self, missing remoteJid, or missing content)... | Session: ${data.token}`
