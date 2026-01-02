@@ -113,18 +113,56 @@ class WtsAPISessionManager {
 
       const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${data.token}`);
 
-      const whatsapp = makeWASocket({ auth: state, logger: logger });
+      const whatsapp = makeWASocket({ auth: state, logger: logger, browser: ["Windows", "Chrome", "10.0"] });
 
       const sendMessageWTyping = async (jid: string, msg: AnyMessageContent) => {
-        await whatsapp.presenceSubscribe(jid);
-        await delay(500);
+        try {
+          await whatsapp.presenceSubscribe(jid);
+          await delay(500);
 
-        await whatsapp.sendPresenceUpdate("composing", jid);
-        await delay(2000);
+          await whatsapp.sendPresenceUpdate("composing", jid);
+          await delay(2000);
 
-        await whatsapp.sendPresenceUpdate("paused", jid);
+          await whatsapp.sendMessage(jid, msg);
 
-        await whatsapp.sendMessage(jid, msg);
+          await whatsapp.sendPresenceUpdate("paused", jid);
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+          Sentry.captureException(err);
+
+          logError(`WTS_SERVICE: Error sending typing message in session ${data.token}`, errorMessage);
+        }
+      };
+
+      const sendMessageImage = async (jid: string, message: SendMessageDto) => {
+        try {
+          const base64Data = message.body.replace(/^data:image\/\w+;base64,/, "");
+          const imageBuffer = Buffer.from(base64Data, "base64");
+
+          const matches = message.body.match(/^data:image\/(\w+);base64,/);
+          const extension = matches?.[1] || "jpg";
+
+          const tempDir = path.join(process.cwd(), "temp");
+          await fs.mkdir(tempDir, { recursive: true });
+
+          const fileName = `${Date.now()}_${data.token}.${extension}`;
+          const tempPath = path.join(tempDir, fileName);
+
+          await fs.writeFile(tempPath, imageBuffer);
+
+          await whatsapp.sendMessage(jid, {
+            image: { url: tempPath },
+            caption: message.title || "",
+          });
+
+          await fs.unlink(tempPath);
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+          Sentry.captureException(err);
+          logError(`WTS_SERVICE: Error sending image message in session ${data.token}`, errorMessage);
+        }
       };
 
       whatsapp.ev.process(async (events) => {
@@ -184,24 +222,51 @@ class WtsAPISessionManager {
                 },
                 async (msg) => {
                   try {
+                    if (!whatsapp.ws.isOpen) {
+                      whatsapp.ws.connect();
+                    }
+
                     const message: SendMessageDto = JSON.parse(msg.body.toString());
 
-                    if (message.to instanceof Array) {
-                      logInfo(`WTS_SERVICE: Sending message to multiple recipients in session ${data.token}`);
-                      for (const recipient of message.to) {
-                        logInfo(`WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`);
+                    const recipients = Array.isArray(message.to) ? message.to : [message.to];
 
-                        await sendMessageWTyping(`${recipient}@c.us`, {
-                          text: message.body,
-                        });
+                    switch (message.type) {
+                      case "image": {
+                        logInfo(
+                          `WTS_SERVICE: Sending image message to ${recipients.length} recipient(s) in session ${data.token}`
+                        );
+
+                        for (const recipient of recipients) {
+                          const jid = `${recipient}@c.us`;
+
+                          logInfo(`WTS_SERVICE: Sending image message to ${recipient} in session ${data.token}`);
+
+                          await sendMessageImage(jid, message);
+                        }
+                        break;
                       }
-                    } else {
-                      await sendMessageWTyping(`${message.to}@c.us`, {
-                        text: message.body,
-                      });
+                      case "text":
+                      default: {
+                        logInfo(
+                          `WTS_SERVICE: Sending message to ${recipients.length} recipient(s) in session ${data.token}`
+                        );
+
+                        for (const recipient of recipients) {
+                          const jid = `${recipient}@c.us`;
+
+                          logInfo(`WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`);
+
+                          await sendMessageWTyping(jid, {
+                            text: message.body,
+                          });
+                        }
+                        break;
+                      }
                     }
                   } catch (err) {
                     const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+                    Sentry.captureException(err);
 
                     logError(`WTS_SERVICE: Error sending message in session ${data.token}`, errorMessage);
                   }
@@ -415,6 +480,7 @@ class WtsAPISessionManager {
                     logInfo(`WTS_SERVICE: Session files removed for ${data.token}`);
                   })
                   .catch((err) => {
+                    Sentry.captureException(err);
                     logError(`WTS_SERVICE: Error removing session files for ${data.token}`, err);
                   });
 
@@ -438,6 +504,8 @@ class WtsAPISessionManager {
               } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
+                Sentry.captureException(err);
+
                 logError(`WTS_SERVICE: Error disconnecting session ${data.token}`, errorMessage);
               }
 
@@ -454,6 +522,7 @@ class WtsAPISessionManager {
       );
 
       sessionManager.on("error", (err) => {
+        Sentry.captureException(err);
         logInfo("WTS_SERVICE: consumer error (session-manager)", err);
       });
 
