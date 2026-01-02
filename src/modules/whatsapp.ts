@@ -113,7 +113,7 @@ class WtsAPISessionManager {
 
       const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${data.token}`);
 
-      const whatsapp = makeWASocket({ auth: state, logger: logger });
+      const whatsapp = makeWASocket({ auth: state, logger: logger, browser: ["Windows", "Chrome", "10.0"] });
 
       const sendMessageWTyping = async (jid: string, msg: AnyMessageContent) => {
         await whatsapp.presenceSubscribe(jid);
