@@ -10,3 +10,28 @@ import "./modules/emails";
 import "./modules/whatsapp";
 
 import "./modules/notifications";
+
+async function main() {
+  console.log("WTSAPI: Microservice started successfully");
+
+  const createTempDir = async () => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+
+    const pathTemp = path.join(process.cwd(), "temp");
+
+    try {
+      const stats = await fs.stat(pathTemp);
+
+      if (!stats.isDirectory()) {
+        await fs.mkdir(pathTemp, { recursive: true });
+      }
+    } catch (err) {
+      await fs.mkdir(pathTemp, { recursive: true });
+    }
+  };
+
+  await createTempDir();
+}
+
+main();
