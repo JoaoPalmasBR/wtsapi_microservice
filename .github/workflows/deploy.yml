@@ -62,6 +62,7 @@ jobs:
             RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
             REDIS_HOST=${{ secrets.REDIS_HOST }}
             REDIS_PORT=${{ secrets.REDIS_PORT }}
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
             EMAIL_HOST=${{ secrets.EMAIL_HOST }}
             EMAIL_PORT=${{ secrets.EMAIL_PORT }}
             EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
