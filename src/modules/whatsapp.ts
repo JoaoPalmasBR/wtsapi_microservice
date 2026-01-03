@@ -19,6 +19,7 @@ import makeWASocket, {
 import { SendMessageDto } from "../dtos/whatsapp";
 import { ContactDto } from "../dtos/contact";
 import logger, { logError, logInfo } from "../libs/logger";
+import redisClient from "../libs/redis";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
@@ -79,6 +80,7 @@ class WtsAPISessionManager {
     });
 
     this.onInit();
+    this.startAllSessionRegistered();
   }
 
   private async onInit() {
@@ -101,6 +103,11 @@ class WtsAPISessionManager {
 
   private async onSessionStart(data: SessionExternalProps) {
     try {
+      await redisClient.set(`wtsapi:${data.token}`, JSON.stringify(data)).catch((err) => {
+        Sentry.captureException(err);
+        logError(`WTS_SERVICE: Error saving session data to Redis for ${data.token}`, err);
+      });
+
       let countRetryConnect = 0;
       logInfo(`WTS_SERVICE: Starting WhatsApp session for token: ${data.token}`);
 
@@ -539,6 +546,34 @@ class WtsAPISessionManager {
       });
 
       return;
+    }
+  }
+
+  private async startAllSessionRegistered() {
+    const pathSessions = path.join(process.cwd(), "sessions");
+
+    try {
+      const sessionTokenPathName = await fs.readdir(pathSessions);
+
+      for (const token of sessionTokenPathName) {
+        const sessionData = await redisClient.get(`wtsapi:${token}`);
+
+        if (sessionData) {
+          const sessionExternal: SessionExternalProps = JSON.parse(sessionData);
+
+          logInfo(`WTS_SERVICE: Starting registered session for token: ${token}`);
+
+          this.onSessionStart(sessionExternal);
+        } else {
+          logInfo(`WTS_SERVICE: No session data found in Redis for token: ${token}`);
+        }
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+      Sentry.captureException(err);
+
+      logError("WTS_SERVICE: Error starting all registered sessions", errorMessage);
     }
   }
 }
