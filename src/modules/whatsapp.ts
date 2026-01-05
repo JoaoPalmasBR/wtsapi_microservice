@@ -405,6 +405,29 @@ class WtsAPISessionManager {
           }
         }
 
+        if (events["labels.association"]) {
+          const labelEvent = events["labels.association"];
+
+          const { type, chatId, labelId } = labelEvent.association;
+
+          console.log("Label Type: ", labelEvent.type);
+          console.log("Label Edit:", { type, chatId, labelId });
+
+          switch (labelEvent.type) {
+            case "add":
+              break;
+            case "remove":
+              break;
+          }
+        }
+
+        if (events["labels.edit"]) {
+          const labelEdit = events["labels.edit"];
+          const { id, color, deleted, name, predefinedId } = labelEdit;
+
+          console.log("Label Edited:", { id, color, deleted, name, predefinedId });
+        }
+
         if (events["messages.upsert"]) {
           try {
             const upsert = events["messages.upsert"];
@@ -539,6 +562,8 @@ class WtsAPISessionManager {
                     Sentry.captureException(err);
                     logError(`WTS_SERVICE: Error removing session files for ${data.token}`, err);
                   });
+
+                await redisClient.del(`wtsapi:${data.token}`);
 
                 logInfo(`WTS_SERVICE: Removing session files for ${data.token}`);
 
