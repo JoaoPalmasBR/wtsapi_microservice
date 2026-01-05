@@ -20,6 +20,7 @@ import { SendMessageDto } from "../dtos/whatsapp";
 import { ContactDto } from "../dtos/contact";
 import logger, { logError, logInfo } from "../libs/logger";
 import redisClient from "../libs/redis";
+import { emit } from "process";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
@@ -115,7 +116,7 @@ class WtsAPISessionManager {
     try {
       const sessionTokenPathName = await fs.readdir(pathSessions);
 
-      for (const token of sessionTokenPathName) {
+      sessionTokenPathName.forEach(async (token) => {
         const sessionData = await redisClient.get(`wtsapi:${token}`);
 
         if (sessionData) {
@@ -127,7 +128,7 @@ class WtsAPISessionManager {
         } else {
           logInfo(`WTS_SERVICE: No session data found in Redis for token: ${token}`);
         }
-      }
+      });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
@@ -139,10 +140,12 @@ class WtsAPISessionManager {
 
   private async onSessionStart(data: SessionExternalProps) {
     try {
-      await redisClient.set(`wtsapi:${data.token}`, JSON.stringify(data)).catch((err) => {
+      try {
+        await redisClient.set(`wtsapi:${data.token}`, JSON.stringify(data));
+      } catch (err) {
+        logError(`WTS_SERVICE: Error saving session data to Redis for token: ${data.token}`, err);
         Sentry.captureException(err);
-        logError(`WTS_SERVICE: Error saving session data to Redis for ${data.token}`, err);
-      });
+      }
 
       let countRetryConnect = 0;
       logInfo(`WTS_SERVICE: Starting WhatsApp session for token: ${data.token}`);
@@ -437,6 +440,10 @@ class WtsAPISessionManager {
                   contactId: msg.key.remoteJid,
                   photo: photoUrl || "",
                 };
+
+                // const contactData = msg.console.log("Labels:", msg.labels);
+                console.log("Message:", msg);
+                console.log("Contact:", msg);
 
                 const messageId = await whatsapp.requestPlaceholderResend(msg.key);
 
