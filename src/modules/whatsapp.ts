@@ -18,7 +18,7 @@ import makeWASocket, {
 
 import { SendMessageDto } from "../dtos/whatsapp";
 import { ContactDto } from "../dtos/contact";
-import logger, { logError, logInfo } from "../libs/logger";
+import logger, { logError, logInfo, logWarn } from "../libs/logger";
 import redisClient from "../libs/redis";
 import { emit } from "process";
 
@@ -440,10 +440,6 @@ class WtsAPISessionManager {
                   contactId: msg.key.remoteJid,
                   photo: photoUrl || "",
                 };
-
-                // const contactData = msg.console.log("Labels:", msg.labels);
-                console.log("Message:", msg);
-                console.log("Contact:", msg);
 
                 const messageId = await whatsapp.requestPlaceholderResend(msg.key);
 
