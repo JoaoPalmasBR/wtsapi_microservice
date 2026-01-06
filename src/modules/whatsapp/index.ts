@@ -10,7 +10,7 @@ import { SessionExternalProps } from "./dtos";
 import { rabbitConfig } from "./rabbitmq";
 import { WhatsAppSession } from "./WhatsAppSession";
 
-new class WtsAPISessionManager {
+new (class WtsAPISessionManager {
   private rabbit: Connection;
   private rabbitPublisher!: Publisher;
   private socket: Socket;
@@ -63,27 +63,51 @@ new class WtsAPISessionManager {
   }
 
   private async init() {
-    const sub = this.rabbit.createConsumer({ ...rabbitConfig }, async (msg) => {
-      const data = JSON.parse(msg.body.toString()) as SessionExternalProps;
-      console.log(`WTS_SERVICE: Received session start request for token: ${data.token}`);
+    while (true) {
+      const jobSession = await redisClient.brpoplpush("wtsapi:jobs:sessions", "wtsapi:processing:sessions", 0);
 
-      const isConnected = await redisClient.get(`wtsapi:${data.token}:connected`);
-      if (isConnected) {
-        console.log(`WTS_SERVICE: Session already running for token: ${data.token}`);
-        return;
+      const job = JSON.parse(jobSession as string) as SessionExternalProps;
+
+      try {
+        console.log(`WTS_SERVICE: Processing session job for token: ${job.token}`);
+
+        const isConnected = await redisClient.get(`wtsapi:${job.token}:connected`);
+        if (isConnected) {
+          console.log(`WTS_SERVICE: Session already running for token: ${job.token}`);
+          await redisClient.lrem("wtsapi:processing:sessions", 1, jobSession as string);
+          continue;
+        }
+
+        await this.startSession(job);
+
+        await redisClient.lrem("wtsapi:processing:sessions", 1, jobSession as string);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+        Sentry.captureException(err);
+        console.error("WTS_SERVICE: Error processing session job", errorMessage);
       }
+    }
+    // const sub = this.rabbit.createConsumer({ ...rabbitConfig }, async (msg) => {
+    //   const data = JSON.parse(msg.body.toString()) as SessionExternalProps;
+    //   console.log(`WTS_SERVICE: Received session start request for token: ${data.token}`);
 
-      await this.startSession(data);
-    });
+    //   const isConnected = await redisClient.get(`wtsapi:${data.token}:connected`);
+    //   if (isConnected) {
+    //     console.log(`WTS_SERVICE: Session already running for token: ${data.token}`);
+    //     return;
+    //   }
 
-    await this.rabbitPublisher.send("wtsapi:disable_all_sessions", {});
+    //   await this.startSession(data);
+    // });
 
-    sub.on("error", (err) => {
-      console.error("WTS_SERVICE: consumer error (user-events)", err);
-    });
+    // await this.rabbitPublisher.send("wtsapi:disable_all_sessions", {});
 
-    await this.startSessionsAlreadyRegistered();
-    console.log("WTS_SERVICE: WhatsApp Worker Session running...");
+    // sub.on("error", (err) => {
+    //   console.error("WTS_SERVICE: consumer error (user-events)", err);
+    // });
+
+    // await this.startSessionsAlreadyRegistered();
+    // console.log("WTS_SERVICE: WhatsApp Worker Session running...");
   }
 
   private async startSessionsAlreadyRegistered() {
@@ -117,12 +141,7 @@ new class WtsAPISessionManager {
       console.log(`WTS_SERVICE: Session data saved to Redis for token: ${data.token}`);
 
       // Cria nova sessão WhatsApp
-      const session = new WhatsAppSession(
-        data,
-        this.rabbit,
-        this.rabbitPublisher,
-        this.socket
-      );
+      const session = new WhatsAppSession(data, this.rabbit, this.rabbitPublisher, this.socket);
 
       this.sessions.set(data.token, session);
       await session.start();
@@ -144,4 +163,4 @@ new class WtsAPISessionManager {
       this.sessions.delete(token);
     }
   }
-}
+})();

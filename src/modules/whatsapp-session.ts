@@ -150,7 +150,7 @@ class WtsAPISessionManager {
       let countRetryConnect = 0;
       console.info(`WTS_SERVICE: Starting WhatsApp session for token: ${data.token}`);
 
-      logger.level = "silent";
+      logger.level = "fatal";
 
       if (countRetryConnect > 5) {
         console.error(`WTS_SERVICE: Max retry connection reached for session ${data.token}`, {});
