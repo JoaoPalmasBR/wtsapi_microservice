@@ -29,6 +29,11 @@ export class WhatsAppSession {
     private rabbitPublisher: Publisher,
     private socket: Socket
   ) {
+    // Inicializa handlers que não dependem do whatsapp
+    this.messageSenderHandler = new MessageSenderHandler(data);
+    this.messageHandler = new MessageHandler(data, rabbitPublisher);
+    this.sessionManagerHandler = new SessionManagerHandler(data, rabbitPublisher, socket);
+
     this.connectionHandler = new ConnectionHandler(
       data,
       rabbit,
@@ -38,12 +43,10 @@ export class WhatsAppSession {
       (count) => {
         this.countRetryConnect = count;
       },
-      () => this.start()
+      () => this.start(),
+      this.messageSenderHandler,
+      this.sessionManagerHandler
     );
-
-    this.messageHandler = new MessageHandler(data, rabbitPublisher);
-    this.sessionManagerHandler = new SessionManagerHandler(data, rabbitPublisher, socket);
-    this.messageSenderHandler = new MessageSenderHandler(data);
   }
 
   async start() {
@@ -55,7 +58,7 @@ export class WhatsAppSession {
         return;
       }
 
-      logger.level = "silent";
+      logger.level = "error";
 
       const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${this.data.token}`);
       this.whatsapp = makeWASocket({
@@ -64,7 +67,7 @@ export class WhatsAppSession {
         browser: ["Windows", "Chrome", "10.0"],
       });
 
-      // Injeta o whatsapp nos handlers
+      // Injeta o whatsapp nos handlers ANTES de configurar os eventos
       this.messageSenderHandler.setWhatsApp(this.whatsapp);
       this.messageHandler.setWhatsApp(this.whatsapp);
       this.sessionManagerHandler.setWhatsApp(this.whatsapp);
@@ -75,8 +78,6 @@ export class WhatsAppSession {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error(`WTS_SERVICE: Error starting session ${this.data.token}`, errorMessage);
       Sentry.captureException(err);
-
-      await redisClient.del(`wtsapi:${this.data.token}:connected`);
 
       await this.rabbitPublisher.send("wtsapi:session_auth_failure", {
         token: this.data.token,

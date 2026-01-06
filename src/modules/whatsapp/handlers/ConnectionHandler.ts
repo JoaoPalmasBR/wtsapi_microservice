@@ -9,9 +9,6 @@ import { MessageSenderHandler } from "./MessageSenderHandler";
 import { SessionManagerHandler } from "./SessionManagerHandler";
 
 export class ConnectionHandler {
-  private messageSenderHandler: MessageSenderHandler;
-  private sessionManagerHandler: SessionManagerHandler;
-
   constructor(
     private data: SessionExternalProps,
     private rabbit: Connection,
@@ -19,11 +16,10 @@ export class ConnectionHandler {
     private socket: Socket,
     private getRetryCount: () => number,
     private setRetryCount: (count: number) => void,
-    private restartSession: () => void
-  ) {
-    this.messageSenderHandler = new MessageSenderHandler(data);
-    this.sessionManagerHandler = new SessionManagerHandler(data, rabbitPublisher, socket);
-  }
+    private restartSession: () => void,
+    private messageSenderHandler: MessageSenderHandler,
+    private sessionManagerHandler: SessionManagerHandler
+  ) {}
 
   async handle(connectionUpdate: any, whatsapp: WASocket) {
     const { connection, lastDisconnect, qr } = connectionUpdate;
