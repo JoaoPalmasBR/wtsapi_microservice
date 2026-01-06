@@ -10,7 +10,7 @@
     "start:prod": "node dist/index.js",
     "build": "rm -rf ./dist && tsc",
     "dev": "ts-node src/index.ts",
-    "dev:watch": "nodemon --exec ts-node src/index.ts",
+    "dev:watch": "nodemon --ignore sessions/** --exec ts-node src/index.ts",
     "sentry:sourcemaps": "sentry-cli sourcemaps inject --org dc-sistemas --project simplix-wts-service ../../../../../../dist && sentry-cli sourcemaps upload --org dc-sistemas --project simplix-wts-service ../../../../../../dist"
   },
   "dependencies": {
