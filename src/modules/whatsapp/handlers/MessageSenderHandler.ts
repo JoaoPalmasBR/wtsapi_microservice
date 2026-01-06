@@ -18,6 +18,7 @@ export class MessageSenderHandler {
   }
 
   async startConsumer(rabbit: Connection) {
+    console.log(`WTS_SERVICE: Starting send message consumer | Session: ${this.data.token}`);
     const subMessage = rabbit.createConsumer(
       {
         queue: `wtsapi:${this.data.token}:send.message`,
@@ -27,10 +28,14 @@ export class MessageSenderHandler {
       async (msg) => {
         const messageHash = Buffer.from(msg.body.toString()).toString("base64").slice(0, 12);
 
+        console.log(
+          `WTS_SERVICE: Received send message request | Session: ${this.data.token} | Message Hash: ${messageHash}`
+        );
+
         try {
           const alreadyProcess = await redisClient.get(`wtsapi:msg:${messageHash}`);
 
-          if (alreadyProcess ) {
+          if (alreadyProcess) {
             console.warn(
               `WTS_SERVICE: Message already processed... | Session: ${this.data.token} | Message Hash: ${messageHash}`
             );
@@ -63,6 +68,8 @@ export class MessageSenderHandler {
     subMessage.on("error", (err) => {
       console.error("WTS_SERVICE: Consumer rabbit error (send-message)", err);
     });
+
+    subMessage.start();
   }
 
   private async sendTextMessages(recipients: string[], message: SendMessageDto) {

@@ -8,7 +8,7 @@ import redisClient from "../../libs/redis";
 import { SessionExternalProps } from "./dtos";
 // import { WhatsAppSession } from "./WhatsAppSession";
 import { rabbitConfig } from "./rabbitmq";
-import { WhatsAppSession } from "./sessions";
+import { WhatsAppSession } from "./WhatsAppSession";
 
 new class WtsAPISessionManager {
   private rabbit: Connection;

@@ -55,7 +55,7 @@ export class WhatsAppSession {
         return;
       }
 
-      logger.level = "error";
+      logger.level = "silent";
 
       const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${this.data.token}`);
       this.whatsapp = makeWASocket({
@@ -75,6 +75,8 @@ export class WhatsAppSession {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       console.error(`WTS_SERVICE: Error starting session ${this.data.token}`, errorMessage);
       Sentry.captureException(err);
+
+      await redisClient.del(`wtsapi:${this.data.token}:connected`);
 
       await this.rabbitPublisher.send("wtsapi:session_auth_failure", {
         token: this.data.token,
