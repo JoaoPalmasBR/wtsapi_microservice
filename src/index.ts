@@ -1,6 +1,7 @@
 import "./libs/sentry";
 
 import dotenv from "dotenv";
+import { logInfo } from "./libs/logger";
 
 dotenv.config();
 
@@ -12,7 +13,7 @@ import "./modules/whatsapp";
 import "./modules/notifications";
 
 async function main() {
-  console.log("WTSAPI: Microservice started successfully");
+  logInfo("WTSAPI: Microservice started successfully");
 
   const createTempDir = async () => {
     const fs = await import("fs/promises");
