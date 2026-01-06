@@ -26,7 +26,7 @@ export class MessageSenderHandler {
         qos: { prefetchCount: 2 },
       },
       async (msg) => {
-        const messageHash = Buffer.from(msg.body.toString()).toString("base64").slice(0, 12);
+        const messageHash = Buffer.from(msg.body.toString()).toString("base64url").slice(0, 30);
 
         console.log(
           `WTS_SERVICE: Received send message request | Session: ${this.data.token} | Message Hash: ${messageHash}`
