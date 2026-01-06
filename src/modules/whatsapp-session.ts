@@ -20,7 +20,6 @@ import { SendMessageDto } from "../dtos/whatsapp";
 import { ContactDto } from "../dtos/contact";
 import logger, { logError, logInfo, logWarn } from "../libs/logger";
 import redisClient from "../libs/redis";
-import { emit } from "process";
 
 const rabbitConfig: ConsumerProps = {
   queue: "wtsapi:session.start",
@@ -281,6 +280,8 @@ class WtsAPISessionManager {
                       return;
                     }
 
+                    await redisClient.set(`wtsapi:msg:${messageHash}`, "processed", "EX", 86400);
+
                     const message: SendMessageDto = JSON.parse(msg.body.toString());
 
                     const recipients = Array.isArray(message.to) ? message.to : [message.to];
@@ -319,7 +320,7 @@ class WtsAPISessionManager {
                       }
                     }
 
-                    await redisClient.set(`wtsapi:msg:${messageHash}`, "processed", "EX", 86400);
+                    await redisClient.del(`wtsapi:msg:${messageHash}`);
                   } catch (err) {
                     const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
