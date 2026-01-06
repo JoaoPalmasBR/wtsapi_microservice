@@ -34,8 +34,6 @@ export class SessionManagerHandler {
       async (msg) => {
         console.log(`WTS_SERVICE: Received session manager event for session ${this.data.token}`);
         const dataEvent: SessionManagerEvent = JSON.parse(msg.body.toString());
-        console.log(dataEvent.event);
-
         switch (dataEvent.event) {
           case "disconnect_session":
             await this.handleDisconnectSession();

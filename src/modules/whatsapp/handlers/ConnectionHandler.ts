@@ -55,7 +55,7 @@ export class ConnectionHandler {
     this.setRetryCount(0);
     console.log(`WTS_SERVICE: WhatsApp connected successfully | Session: ${this.data.token}`);
 
-    await redisClient.set(`wtsapi:${this.data.token}:connected`, "true");
+    await redisClient.set(`wtsapi:${this.data.token}:connected`, "true", "EX", 240); // 4 minutes expiration
 
     // Notificações
     this.socket.emit("INTERNAL:session:socket", {
@@ -130,6 +130,7 @@ export class ConnectionHandler {
 
       case DisconnectReason.loggedOut:
         console.log(`WTS_SERVICE: Device logged out, please scan again | Session: ${this.data.token}`);
+        await redisClient.del(`wtsapi:${this.data.token}:connected`);
         break;
 
       case DisconnectReason.restartRequired:

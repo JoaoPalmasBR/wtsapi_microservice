@@ -167,7 +167,7 @@ class WtsAPISessionManager {
           await delay(500);
 
           await whatsapp.sendPresenceUpdate("composing", jid);
-          await delay(2000);
+          await delay(4000);
 
           await whatsapp.sendMessage(jid, msg);
 

@@ -7,8 +7,8 @@ dotenv.config();
 import "./modules/websocket";
 
 import "./modules/emails";
-// import "./modules/whatsapp"
-import "./modules/whatsapp-session";
+import "./modules/whatsapp"
+// import "./modules/whatsapp-session";
 
 import "./modules/notifications";
 
