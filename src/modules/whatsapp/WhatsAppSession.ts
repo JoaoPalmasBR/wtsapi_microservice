@@ -87,12 +87,6 @@ export class WhatsAppSession {
 
   private setupEventListeners() {
     this.whatsapp.ev.process(async (events) => {
-      console.log(
-        `Received events: ${Object.keys(events).join(", ")} | Session: ${
-          this.data.token
-        } | Time: ${new Date().toLocaleTimeString()}`
-      );
-
       // Handler de conexão
       if (events["connection.update"]) {
         await this.connectionHandler.handle(events["connection.update"], this.whatsapp);
