@@ -63,51 +63,27 @@ new (class WtsAPISessionManager {
   }
 
   private async init() {
-    while (true) {
-      const jobSession = await redisClient.brpoplpush("wtsapi:jobs:sessions", "wtsapi:processing:sessions", 0);
+    const sub = this.rabbit.createConsumer({ ...rabbitConfig }, async (msg) => {
+      const data = JSON.parse(msg.body.toString()) as SessionExternalProps;
+      console.log(`WTS_SERVICE: Received session start request for token: ${data.token}`);
 
-      const job = JSON.parse(jobSession as string) as SessionExternalProps;
-
-      try {
-        console.log(`WTS_SERVICE: Processing session job for token: ${job.token}`);
-
-        const isConnected = await redisClient.get(`wtsapi:${job.token}:connected`);
-        if (isConnected) {
-          console.log(`WTS_SERVICE: Session already running for token: ${job.token}`);
-          await redisClient.lrem("wtsapi:processing:sessions", 1, jobSession as string);
-          continue;
-        }
-
-        await this.startSession(job);
-
-        await redisClient.lrem("wtsapi:processing:sessions", 1, jobSession as string);
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Unknown error";
-        Sentry.captureException(err);
-        console.error("WTS_SERVICE: Error processing session job", errorMessage);
+      const isConnected = await redisClient.get(`wtsapi:${data.token}:connected`);
+      if (isConnected) {
+        console.log(`WTS_SERVICE: Session already running for token: ${data.token}`);
+        return;
       }
-    }
-    // const sub = this.rabbit.createConsumer({ ...rabbitConfig }, async (msg) => {
-    //   const data = JSON.parse(msg.body.toString()) as SessionExternalProps;
-    //   console.log(`WTS_SERVICE: Received session start request for token: ${data.token}`);
 
-    //   const isConnected = await redisClient.get(`wtsapi:${data.token}:connected`);
-    //   if (isConnected) {
-    //     console.log(`WTS_SERVICE: Session already running for token: ${data.token}`);
-    //     return;
-    //   }
+      await this.startSession(data);
+    });
 
-    //   await this.startSession(data);
-    // });
+    await this.rabbitPublisher.send("wtsapi:disable_all_sessions", {});
 
-    // await this.rabbitPublisher.send("wtsapi:disable_all_sessions", {});
+    sub.on("error", (err) => {
+      console.error("WTS_SERVICE: consumer error (user-events)", err);
+    });
 
-    // sub.on("error", (err) => {
-    //   console.error("WTS_SERVICE: consumer error (user-events)", err);
-    // });
-
-    // await this.startSessionsAlreadyRegistered();
-    // console.log("WTS_SERVICE: WhatsApp Worker Session running...");
+    await this.startSessionsAlreadyRegistered();
+    console.log("WTS_SERVICE: WhatsApp Worker Session running...");
   }
 
   private async startSessionsAlreadyRegistered() {
