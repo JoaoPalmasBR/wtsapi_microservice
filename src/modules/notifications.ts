@@ -54,20 +54,25 @@ new (class NotificationService {
         console.info("WTS_SERVICE: Notification provider Socket connected:", this.socket.id);
       });
 
-      this.socket.emit("INTERNAL:notification-web", {
-        clientId: data.clientId,
-        data: {
-          type: data.data.type,
-          metadata: {
-            notify: {
-              type: data.data.metadata.notify.type,
-              title: data.data.metadata.notify.title,
-              description: data.data.metadata.notify.description,
-              duration: 5000,
+      try {
+        this.socket.emit("INTERNAL:notification-web", {
+          clientId: data.clientId,
+          data: {
+            type: data.data.type,
+            metadata: {
+              notify: {
+                type: data.data.metadata.notify.type,
+                title: data.data.metadata.notify.title,
+                description: data.data.metadata.notify.description,
+                duration: 5000,
+              },
             },
           },
-        },
-      });
+        });
+      } catch (err) {
+        console.error("WTS_SERVICE: Error emitting notification via socket");
+        Sentry.captureException(err);
+      }
     });
 
     sub.on("error", (err) => {
