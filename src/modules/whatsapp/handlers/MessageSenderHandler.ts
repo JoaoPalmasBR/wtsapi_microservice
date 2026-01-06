@@ -18,7 +18,8 @@ export class MessageSenderHandler {
   }
 
   async startConsumer(rabbit: Connection) {
-    console.log(`WTS_SERVICE: Starting send message consumer | Session: ${this.data.token}`);
+    console.log(`WTS_SERVICE: Starting message sender consumer for session ${this.data.token}`);
+
     const subMessage = rabbit.createConsumer(
       {
         queue: `wtsapi:${this.data.token}:send.message`,
@@ -26,20 +27,20 @@ export class MessageSenderHandler {
         qos: { prefetchCount: 2 },
       },
       async (msg) => {
-        const messageHash = Buffer.from(msg.body.toString()).toString("base64url").slice(0, 30);
-
-        console.log(
-          `WTS_SERVICE: Received send message request | Session: ${this.data.token} | Message Hash: ${messageHash}`
-        );
+        console.log(`WTS_SERVICE: Received message to send in session ${this.data.token}`);
+        const messageHash = Buffer.from(msg.body.toString()).toString("base64").slice(0, 12);
 
         try {
           const alreadyProcess = await redisClient.get(`wtsapi:msg:${messageHash}`);
 
           if (alreadyProcess) {
             console.warn(
-              `WTS_SERVICE: Message already processed... | Session: ${this.data.token} | Message Hash: ${messageHash}`
+              `WTS_SERVICE: Message already processed, skipping... | Session: ${this.data.token} | Message Hash: ${messageHash}`
             );
+            return;
           }
+
+          await redisClient.set(`wtsapi:msg:${messageHash}`, "processed", "EX", 86400);
 
           const message: SendMessageDto = JSON.parse(msg.body.toString());
           const recipients = Array.isArray(message.to) ? message.to : [message.to];
@@ -55,7 +56,7 @@ export class MessageSenderHandler {
               break;
           }
 
-          await redisClient.set(`wtsapi:msg:${messageHash}`, "processed", "EX", 3600);
+          await redisClient.del(`wtsapi:msg:${messageHash}`);
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : "Unknown error";
           Sentry.captureException(err);
@@ -68,8 +69,6 @@ export class MessageSenderHandler {
     subMessage.on("error", (err) => {
       console.error("WTS_SERVICE: Consumer rabbit error (send-message)", err);
     });
-
-    subMessage.start();
   }
 
   private async sendTextMessages(recipients: string[], message: SendMessageDto) {

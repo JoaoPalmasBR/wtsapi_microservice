@@ -23,6 +23,8 @@ export class SessionManagerHandler {
   }
 
   async startConsumer(rabbit: Connection) {
+    console.log(`WTS_SERVICE: Starting session manager consumer for session ${this.data.token}`);
+
     const sessionManager = rabbit.createConsumer(
       {
         queue: `wtsapi:${this.data.token}:session.manager`,
@@ -30,6 +32,7 @@ export class SessionManagerHandler {
         qos: { prefetchCount: 2 },
       },
       async (msg) => {
+        console.log(`WTS_SERVICE: Received session manager event for session ${this.data.token}`);
         const dataEvent: SessionManagerEvent = JSON.parse(msg.body.toString());
         console.log(dataEvent.event);
 
@@ -50,8 +53,10 @@ export class SessionManagerHandler {
 
     sessionManager.on("error", (err) => {
       Sentry.captureException(err);
-      console.log("WTS_SERVICE: consumer error (session-manager)", err);
+      console.error("WTS_SERVICE: consumer error (session-manager)", err);
     });
+
+    console.log(`WTS_SERVICE: Session manager consumer started successfully for session ${this.data.token}`);
   }
 
   private async handleDisconnectSession() {
