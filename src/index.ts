@@ -7,12 +7,12 @@ dotenv.config();
 import "./modules/websocket";
 
 import "./modules/emails";
-import "./modules/whatsapp";
+import "./modules/whatsapp"
 
 import "./modules/notifications";
 
 async function main() {
-  console.log("WTSAPI: Microservice started successfully");
+  console.info("WTSAPI: Microservice started successfully");
 
   const createTempDir = async () => {
     const fs = await import("fs/promises");
