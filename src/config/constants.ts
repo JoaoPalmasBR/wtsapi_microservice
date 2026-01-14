@@ -10,24 +10,19 @@ export const APP_CONFIG = {
   COMPOSING_DELAY: 4000,
 } as const;
 
-export const REDIS_KEYS = {
-  SESSION: (token: string) => `wtsapi:${token}`,
-} as const;
-
-export const RABBITMQ_QUEUES = {
-  SESSION_START: "wtsapi:session.start",
+export const QUEUE_KEYS = {
   EVENTS: "wtsapi.events",
-  SESSION_STARTED: "wtsapi:session_started",
-  SESSION_AUTH_FAILURE: "wtsapi:session_auth_failure",
-  SESSION_DISCONNECTED: "wtsapi:session_disconnected",
-  DISABLE_ALL_SESSIONS: "wtsapi:disable_all_sessions",
-  SEND_MESSAGE_TO_WEBHOOK: "wtsapi:send_message_to_webhook",
-  SEND_MESSAGE: (token: string) => `wtsapi:${token}:send.message`,
-  SESSION_MANAGER: (token: string) => `wtsapi:${token}:session.manager`,
-} as const;
-
-export const RABBITMQ_EXCHANGES = {
-  EVENTS: "wtsapi-events",
+  SESSION: (token: string) => `wtsapi.${token}`,
+  SESSION_START: "wtsapi.session.start.main",
+  SESSION_QRCODE: "BlibsendBackend.Queues.Sessions.QueueQrCodeReceived",
+  SESSION_STARTED: "BlibsendBackend.Queues.Sessions.QueueStatusConnected",
+  SEND_NOTIFICATION: "wtsapi.send.notification",
+  SESSION_AUTH_FAILURE: "wtsapi.session.auth_failure",
+  SESSION_DISCONNECTED: "BlibsendBackend.Queues.Sessions.QueueStatusDisconnected",
+  DISABLE_ALL_SESSIONS: "BlibsendBackend.Queues.Sessions.QueueDisableAllSessions",
+  SEND_MESSAGE_TO_WEBHOOK: "BlibsendBackend.Queues.Sessions.QueueSendMessageToWebhook",
+  SEND_MESSAGE: (token: string) => `wtsapi.${token}.send.message`,
+  SESSION_MANAGER: (token: string) => `wtsapi.${token}.session.manager`,
 } as const;
 
 export const WHATSAPP_JID = {
@@ -47,18 +42,6 @@ export const MESSAGE_TYPES = {
 export const SESSION_EVENTS = {
   DISCONNECT_SESSION: "disconnect_session",
   SEND_TYPING_EVENT: "send_typing_event",
-} as const;
-
-export const SOCKET_EVENTS = {
-  INTERNAL_SESSION_SOCKET: "INTERNAL:session:socket",
-  INTERNAL_NOTIFICATION_WEB: "INTERNAL:notification-web",
-} as const;
-
-export const NOTIFICATION_TYPES = {
-  SUCCESS: "success",
-  WARNING: "warning",
-  ERROR: "error",
-  INFO: "info",
 } as const;
 
 export const PATHS = {

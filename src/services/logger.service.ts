@@ -44,4 +44,4 @@ export class LoggerService {
   }
 }
 
-export const logger = new LoggerService();
+export const log = new LoggerService();

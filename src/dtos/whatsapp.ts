@@ -1,6 +1,8 @@
 export interface SendMessageDto {
-  to: string | string[];
   type: "text" | "image" | "document" | "video" | "audio" | "sticker";
-  body: string;
-  title?: string;
+  metadata: {
+    to: string | string[];
+    body: string;
+    title?: string;
+  };
 }
