@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "wtsapi.microservice",
       script: "pnpm start:prod",
-      max_memory_restart: "450M",
+      max_memory_restart: "550M",
       env: {
         NODE_ENV: "production",
       },

@@ -1,7 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { PATHS } from "../config/constants";
-import { logger } from "../services/logger.service";
+import { log } from "../services/logger.service";
 
 export class FileUtils {
   static async ensureDirectoryExists(dirPath: string): Promise<void> {
@@ -26,7 +26,7 @@ export class FileUtils {
       await fs.unlink(filePath);
       return true;
     } catch (err) {
-      logger.warn(`Failed to remove file: ${filePath}`, err);
+      log.warn(`Failed to remove file: ${filePath}`, err);
       return false;
     }
   }
@@ -36,7 +36,7 @@ export class FileUtils {
       await fs.rm(dirPath, { recursive: true, force: true });
       return true;
     } catch (err) {
-      logger.error(`Failed to remove directory: ${dirPath}`, err);
+      log.error(`Failed to remove directory: ${dirPath}`, err);
       return false;
     }
   }
@@ -45,7 +45,7 @@ export class FileUtils {
     try {
       return await fs.readdir(dirPath);
     } catch (err) {
-      logger.error(`Failed to list files in: ${dirPath}`, err);
+      log.error(`Failed to list files in: ${dirPath}`, err);
       return [];
     }
   }

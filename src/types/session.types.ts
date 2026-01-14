@@ -1,5 +1,4 @@
 import { AnyMessageContent } from "baileys";
-import { Socket as SocketIOSocket } from "socket.io-client";
 
 export interface SessionExternalProps {
   name: string;
