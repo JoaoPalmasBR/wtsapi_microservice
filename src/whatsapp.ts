@@ -56,10 +56,16 @@ new (class WtsMainService {
       this.logSessionsStatus();
       this.cleanupClosedSessions();
     }, INTERVAL_TIME);
+
+    const RESTART_INTERVAL_TIME = 15 * 60 * 1000; // 15 minutos
+
+    setInterval(() => {
+      this.reStartSessionClosed();
+    }, RESTART_INTERVAL_TIME);
   }
 
   private async onInit() {
-    log.info("WTS_SERVICE: Initializing WTS Main Service...");
+    log.info("Initializing WTS Main Service...");
 
     await publishEvent("sessions", QUEUE_KEYS.DISABLE_ALL_SESSIONS, {});
 
@@ -73,10 +79,42 @@ new (class WtsMainService {
       const jobObjString = job[0];
       const jobObj: SessionExternalProps = JSON.parse(jobObjString.data);
 
-      log.info(`WTS_SERVICE: Received session start request for token: ${jobObj.token}`);
+      log.info(`Received session start request for token: ${jobObj.token}`);
 
       this.onSessionStart(jobObj);
     });
+  }
+
+  private async reStartSessionClosed(): Promise<void> {
+    const session_path = path.join(process.cwd(), "sessions");
+
+    try {
+      log.info("Restarting closed sessions...");
+      const session_token_path_name = await fs.readdir(session_path);
+
+      session_token_path_name.forEach(async (token) => {
+        const session = this.getSession(token);
+
+        if (!session || session.status !== "open") {
+          const sessionData = await getSessionCache(token);
+
+          if (sessionData) {
+            const sessionExternal: SessionExternalProps = JSON.parse(sessionData);
+
+            log.info(`Restarting session for token: ${token}`);
+
+            this.onSessionStart(sessionExternal);
+          } else {
+            log.info(`No session data found in sessions_cache for token: ${token}`);
+          }
+        }
+      });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+      Sentry.captureException(err);
+      log.error("Error restarting already registered sessions", errorMessage);
+    }
   }
 
   private getSession(token: string): SessionData | undefined {
@@ -96,10 +134,10 @@ new (class WtsMainService {
           await session.socket.logout();
         }
       } catch (err) {
-        log.error(`WTS_SERVICE: Error logging out session ${token}`, err);
+        log.error(`Error logging out session ${token}`, err);
       }
       this.sessions.delete(token);
-      log.info(`WTS_SERVICE: Session removed from memory: ${token}`);
+      log.info(`Session removed from memory: ${token}`);
     }
   }
 
@@ -122,7 +160,7 @@ new (class WtsMainService {
     const closed = this.getAllSessions().filter((s) => s.status === "closed").length;
 
     log.info(
-      `WTS_SERVICE: Sessions Status - Total: ${total} | Open: ${open} | Connecting: ${connecting} | Closed: ${closed}`,
+      `Sessions Status - Total: ${total} | Open: ${open} | Connecting: ${connecting} | Closed: ${closed}`,
     );
   }
 
@@ -130,7 +168,7 @@ new (class WtsMainService {
     const closedSessions = this.getAllSessions().filter((s) => s.status === "closed");
 
     for (const session of closedSessions) {
-      log.info(`WTS_SERVICE: Cleaning up closed session: ${session.token}`);
+      log.info(`Cleaning up closed session: ${session.token}`);
       await this.removeSession(session.token);
     }
   }
@@ -138,13 +176,13 @@ new (class WtsMainService {
   private async sendMessageWTyping(token: string, jid: string, msg: string): Promise<void> {
     const session = this.getSession(token);
     if (!session) {
-      log.error(`WTS_SERVICE: Session not found for token: ${token}`);
+      log.error(`Session not found for token: ${token}`);
       throw new Error("Session not found");
     }
 
     try {
       if (session.socket.ws.isClosed) {
-        log.warn(`WTS_SERVICE: WebSocket closed, attempting to reconnect... | Session: ${token}`);
+        log.warn(`WebSocket closed, attempting to reconnect... | Session: ${token}`);
         session.socket.ws.connect();
         await delay(2000);
       }
@@ -162,7 +200,7 @@ new (class WtsMainService {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       Sentry.captureException(err);
-      log.error(`WTS_SERVICE: Error sending typing message in session ${token}`, errorMessage);
+      log.error(`Error sending typing message in session ${token}`, errorMessage);
       throw err;
     }
   }
@@ -170,13 +208,13 @@ new (class WtsMainService {
   private async sendMessageImage(token: string, jid: string, message: SendMessageDto): Promise<void> {
     const session = this.getSession(token);
     if (!session) {
-      log.error(`WTS_SERVICE: Session not found for token: ${token}`);
+      log.error(`Session not found for token: ${token}`);
       throw new Error("Session not found");
     }
 
     try {
       if (session.socket.ws.isClosed) {
-        log.warn(`WTS_SERVICE: WebSocket closed, attempting to reconnect... | Session: ${token}`);
+        log.warn(`WebSocket closed, attempting to reconnect... | Session: ${token}`);
         session.socket.ws.connect();
         await delay(2000);
       }
@@ -207,7 +245,7 @@ new (class WtsMainService {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       Sentry.captureException(err);
-      log.error(`WTS_SERVICE: Error sending image message in session ${token}`, errorMessage);
+      log.error(`Error sending image message in session ${token}`, errorMessage);
       throw err;
     }
   }
@@ -224,18 +262,18 @@ new (class WtsMainService {
         if (sessionData) {
           const sessionExternal: SessionExternalProps = JSON.parse(sessionData);
 
-          log.info(`WTS_SERVICE: Starting registered session for token: ${token}`);
+          log.info(`Starting registered session for token: ${token}`);
 
           this.onSessionStart(sessionExternal);
         } else {
-          log.info(`WTS_SERVICE: No session data found in sessions_cache for token: ${token}`);
+          log.info(`No session data found in sessions_cache for token: ${token}`);
         }
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
       Sentry.captureException(err);
-      log.error("WTS_SERVICE: Error starting already registered sessions", errorMessage);
+      log.error("Error starting already registered sessions", errorMessage);
     }
   }
 
@@ -245,23 +283,23 @@ new (class WtsMainService {
 
       if (existingSession && existingSession.status === "open") {
         await publishEvent("sessions", QUEUE_KEYS.SESSION_STARTED, { token: data.token });
-        log.warn(`WTS_SERVICE: Session already exists and is open for token: ${data.token}`);
+        log.warn(`Session already exists and is open for token: ${data.token}`);
         return;
       }
 
       if (existingSession && existingSession.status === "closed") {
-        log.info(`WTS_SERVICE: Removing closed session before creating new one: ${data.token}`);
+        log.info(`Removing closed session before creating new one: ${data.token}`);
         await this.removeSession(data.token);
       }
 
       const retryCount = existingSession?.retryCount || 0;
       if (retryCount > 5) {
-        log.error(`WTS_SERVICE: Max retry connection reached for session ${data.token}`, {});
+        log.error(`Max retry connection reached for session ${data.token}`, {});
         await this.removeSession(data.token);
         return;
       }
 
-      log.info(`WTS_SERVICE: Starting WhatsApp session for token: ${data.token}`);
+      log.info(`Starting WhatsApp session for token: ${data.token}`);
 
       logger.level = "silent";
 
@@ -284,7 +322,7 @@ new (class WtsMainService {
       };
 
       this.sessions.set(data.token, sessionData);
-      log.info(`WTS_SERVICE: Session stored in memory: ${data.token}`);
+      log.info(`Session stored in memory: ${data.token}`);
 
       whatsapp.ev.process(async (events) => {
         if (events["connection.update"]) {
@@ -293,7 +331,7 @@ new (class WtsMainService {
           const session = this.getSession(data.token);
 
           if (!session) {
-            log.error(`WTS_SERVICE: Session not found in memory during connection update: ${data.token}`);
+            log.error(`Session not found in memory during connection update: ${data.token}`);
             return;
           }
 
@@ -302,7 +340,7 @@ new (class WtsMainService {
               session.status = "open";
               session.retryCount = 0;
 
-              log.info(`WTS_SERVICE: WhatsApp connected successfully | Session: ${data.token}`);
+              log.info(`WhatsApp connected successfully | Session: ${data.token}`);
 
               await publishEvent("sessions", QUEUE_KEYS.SESSION_STARTED, { token: data.token });
               await saveSessionCache(data.token, JSON.stringify(data));
@@ -318,11 +356,11 @@ new (class WtsMainService {
                   const jobObj: SendMessageDto = JSON.parse(jobObjString.data);
 
                   if (!this.isSessionOpen(data.token)) {
-                    log.warn(`WTS_SERVICE: Cannot send message, session is not open: ${data.token}`);
+                    log.warn(`Cannot send message, session is not open: ${data.token}`);
                     return;
                   }
 
-                  console.log(`WTS_SERVICE: Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
+                  console.log(`Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
                   const recipients = Array.isArray(jobObj.metadata.to) ? jobObj.metadata.to : [jobObj.metadata.to];
 
                   for (const recipient of recipients) {
@@ -335,7 +373,7 @@ new (class WtsMainService {
                         await this.sendMessageWTyping(data.token, jid, jobObj.metadata.body);
                       }
                     } catch (err) {
-                      log.error(`WTS_SERVICE: Failed to send message to ${recipient}`, err);
+                      log.error(`Failed to send message to ${recipient}`, err);
                     }
                   }
                 });
@@ -351,46 +389,46 @@ new (class WtsMainService {
               switch (status) {
                 case DisconnectReason.badSession:
                   log.info(
-                    `WTS_SERVICE: Bad session file, please delete session and scan again | Session: ${data.token}`,
+                    `Bad session file, please delete session and scan again | Session: ${data.token}`,
                   );
                   session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.connectionClosed:
-                  log.info(`WTS_SERVICE: Connection closed, reconnecting... | Session: ${data.token}`);
+                  log.info(`Connection closed, reconnecting... | Session: ${data.token}`);
                   session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.connectionLost:
-                  log.info(`WTS_SERVICE: Connection lost from WhatsApp, reconnecting... | Session: ${data.token}`);
+                  log.info(`Connection lost from WhatsApp, reconnecting... | Session: ${data.token}`);
                   session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.connectionReplaced:
                   log.info(
-                    `WTS_SERVICE: Connection replaced by another session, logging out... | Session: ${data.token}`,
+                    `Connection replaced by another session, logging out... | Session: ${data.token}`,
                   );
                   await this.removeSession(data.token);
                   await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
                   break;
                 case DisconnectReason.loggedOut:
-                  log.info(`WTS_SERVICE: Device logged out, please scan again | Session: ${data.token}`);
+                  log.info(`Device logged out, please scan again | Session: ${data.token}`);
                   await this.removeSession(data.token);
                   await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
                   break;
                 case DisconnectReason.restartRequired:
-                  log.info(`WTS_SERVICE: Restart required, restarting... | Session: ${data.token}`);
+                  log.info(`Restart required, restarting... | Session: ${data.token}`);
                   session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.multideviceMismatch:
-                  log.info(`WTS_SERVICE: Connection timeout, reconnecting... | Session: ${data.token}`);
+                  log.info(`Connection timeout, reconnecting... | Session: ${data.token}`);
                   session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 default:
                   log.info(
-                    `WTS_SERVICE: Unknown disconnect reason: ${status}| Session: ${data.token}, reconnecting...`,
+                    `Unknown disconnect reason: ${status}| Session: ${data.token}, reconnecting...`,
                   );
                   session.retryCount += 1;
                   this.onSessionStart(data);
@@ -405,7 +443,7 @@ new (class WtsMainService {
           }
 
           if (qr) {
-            log.info(`WTS_SERVICE: QR Code generated for ${data.token} - ${new Date().toLocaleTimeString()}`);
+            log.info(`QR Code generated for ${data.token} - ${new Date().toLocaleTimeString()}`);
 
             await publishEvent("sessions", QUEUE_KEYS.SESSION_QRCODE, { token: data.token, qrCode: qr });
           }
@@ -420,7 +458,7 @@ new (class WtsMainService {
               for (const msg of upsert.messages) {
                 if (msg.key.fromMe || !msg.key.remoteJid || !msg.message) {
                   log.info(
-                    `WTS_SERVICE: Ignoring message (from self, missing remoteJid, or missing content)... | Session: ${data.token}`,
+                    `Ignoring message (from self, missing remoteJid, or missing content)... | Session: ${data.token}`,
                   );
                   continue;
                 }
@@ -433,7 +471,7 @@ new (class WtsMainService {
                   remoteJid === "status@broadcast" // status
                 ) {
                   log.info(
-                    `WTS_SERVICE: Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`,
+                    `Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`,
                   );
                   continue;
                 }
@@ -455,7 +493,7 @@ new (class WtsMainService {
                   if (audioMessage.mimetype === "audio/ogg; codecs=opus") {
                     const media = await downloadMediaMessage(msg, "buffer", {});
 
-                    log.info(`WTS_SERVICE: Send voice message to webhook for ${data.token}`);
+                    log.info(`Send voice message to webhook for ${data.token}`);
 
                     await publishEvent("sessions", QUEUE_KEYS.SEND_MESSAGE_TO_WEBHOOK, {
                       type: "voice",
@@ -479,7 +517,7 @@ new (class WtsMainService {
                 if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
                   const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
 
-                  log.info(`WTS_SERVICE: Send message to webhook |> ${data.token}`);
+                  log.info(`Send message to webhook |> ${data.token}`);
 
                   await publishEvent("sessions", QUEUE_KEYS.SEND_MESSAGE_TO_WEBHOOK, {
                     type: "text",
@@ -502,7 +540,7 @@ new (class WtsMainService {
           } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-            log.error(`WTS_SERVICE: Error in send message to webhook in session ${data.token}`, errorMessage);
+            log.error(`Error in send message to webhook in session ${data.token}`, errorMessage);
           }
         }
       });
@@ -524,12 +562,12 @@ new (class WtsMainService {
 
         if (event === "disconnect_session") {
           try {
-            log.info(`WTS_SERVICE: Disconnecting session: ${data.token}`);
+            log.info(`Disconnecting session: ${data.token}`);
 
             // Remover da memória e fazer logout
             await this.removeSession(data.token);
 
-            log.info(`WTS_SERVICE: Session destroyed: ${data.token}`);
+            log.info(`Session destroyed: ${data.token}`);
 
             await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
             await deleteSessionCache(data.token);
@@ -539,18 +577,18 @@ new (class WtsMainService {
 
             fs.rm(sessionPath, { recursive: true, force: true })
               .then(() => {
-                log.info(`WTS_SERVICE: Session files removed for ${data.token}`);
+                log.info(`Session files removed for ${data.token}`);
               })
               .catch((err) => {
                 Sentry.captureException(err);
-                log.error(`WTS_SERVICE: Error removing session files for ${data.token}`, err);
+                log.error(`Error removing session files for ${data.token}`, err);
               });
           } catch (err) {
             const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
             Sentry.captureException(err);
 
-            log.error(`WTS_SERVICE: Error disconnecting session ${data.token}`, errorMessage);
+            log.error(`Error disconnecting session ${data.token}`, errorMessage);
           }
         }
       });
@@ -559,7 +597,7 @@ new (class WtsMainService {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
-      log.error(`WTS_SERVICE: Error starting session ${data.token}`, errorMessage);
+      log.error(`Error starting session ${data.token}`, errorMessage);
 
       Sentry.captureException(err);
 
