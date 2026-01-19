@@ -3,23 +3,30 @@ import path from "path";
 import Sentry from "@sentry/node";
 
 import { Boom } from "@hapi/boom";
-import { Worker } from "bullmq";
 
 import makeWASocket, {
+  Browsers,
   delay,
   DisconnectReason,
-  AnyMessageContent,
   downloadMediaMessage,
   useMultiFileAuthState,
+  WASocket,
 } from "baileys";
-import { redis } from "./libs/redis";
-import { QUEUE_KEYS } from "./config/constants";
 
-import { SendMessageDto } from "./dtos/whatsapp";
-import { ContactDto } from "./types/contact.types";
-import { log } from "./services/logger.service";
+import { PRODUCER_QUEUES_KEYS, QUEUE_KEYS } from "./config/constants";
+
 import logger from "./libs/logger";
-import { publishEvent } from "./libs/pq";
+
+import { log } from "./services/logger.service";
+import { pgBoss } from "./libs/pg-boss";
+import { ContactDto } from "./types/contact.types";
+import { deleteSessionCache, getSessionCache, publishEvent, saveSessionCache } from "./libs/pq";
+import { SendMessageDto } from "./dtos/whatsapp";
+
+interface JobData {
+  id: string;
+  data: string;
+}
 
 interface SessionExternalProps {
   name: string;
@@ -28,10 +35,27 @@ interface SessionExternalProps {
   clientId: string;
 }
 
+interface SessionData {
+  socket: WASocket;
+  token: string;
+  props: SessionExternalProps;
+  status: "connecting" | "open" | "closed";
+  retryCount: number;
+  queueInitialized: boolean;
+}
+
 new (class WtsMainService {
+  private sessions: Map<string, SessionData> = new Map();
+
   constructor() {
     this.onInit();
-    this.startSessionsAlreadyRegistered();
+
+    const INTERVAL_TIME = 5 * 60 * 1000; // 5 minutos
+
+    setInterval(() => {
+      this.logSessionsStatus();
+      this.cleanupClosedSessions();
+    }, INTERVAL_TIME);
   }
 
   private async onInit() {
@@ -39,39 +63,164 @@ new (class WtsMainService {
 
     await publishEvent("sessions", QUEUE_KEYS.DISABLE_ALL_SESSIONS, {});
 
-    const worker_main = new Worker(
-      QUEUE_KEYS.SESSION_START,
-      async (msg) => {
-        if (!msg) {
-          log.warn("Received empty message in session start consumer, ignoring...");
-          return;
-        }
+    await this.startSessionsAlreadyRegistered();
 
-        const sessionData: SessionExternalProps = msg.data;
-        log.info(`WTS_SERVICE: Received session start request for token: ${sessionData.token}`);
-
-        this.onSessionStart(sessionData);
-      },
-      {
-        connection: redis,
+    await pgBoss.work(QUEUE_KEYS.SESSION_START, async (job: JobData[]) => {
+      if (!job) {
+        log.warn("Received empty message in session start consumer, ignoring...");
+        return;
       }
-    );
+      const jobObjString = job[0];
+      const jobObj: SessionExternalProps = JSON.parse(jobObjString.data);
 
-    worker_main.on("completed", (job) => {
-      log.info(`Worker main ${job.id} has completed!`);
-    });
+      log.info(`WTS_SERVICE: Received session start request for token: ${jobObj.token}`);
 
-    worker_main.on("failed", (job, err) => {
-      log.error(`Worker main ${job?.id} has failed with ${err.message}`);
+      this.onSessionStart(jobObj);
     });
   }
 
-  private async startSessionsAlreadyRegistered() {
-    const pathSessions = path.join(process.cwd(), "sessions");
+  private getSession(token: string): SessionData | undefined {
+    return this.sessions.get(token);
+  }
+
+  private isSessionOpen(token: string): boolean {
+    const session = this.getSession(token);
+    return session?.status === "open" && !session.socket.ws.isClosed;
+  }
+
+  private async removeSession(token: string): Promise<void> {
+    const session = this.sessions.get(token);
+    if (session) {
+      try {
+        if (!session.socket.ws.isClosed) {
+          await session.socket.logout();
+        }
+      } catch (err) {
+        log.error(`WTS_SERVICE: Error logging out session ${token}`, err);
+      }
+      this.sessions.delete(token);
+      log.info(`WTS_SERVICE: Session removed from memory: ${token}`);
+    }
+  }
+
+  private getAllSessions(): SessionData[] {
+    return Array.from(this.sessions.values());
+  }
+
+  private getSessionCount(): number {
+    return this.sessions.size;
+  }
+
+  private getOpenSessions(): SessionData[] {
+    return this.getAllSessions().filter((s) => s.status === "open");
+  }
+
+  private logSessionsStatus(): void {
+    const total = this.getSessionCount();
+    const open = this.getOpenSessions().length;
+    const connecting = this.getAllSessions().filter((s) => s.status === "connecting").length;
+    const closed = this.getAllSessions().filter((s) => s.status === "closed").length;
+
+    log.info(
+      `WTS_SERVICE: Sessions Status - Total: ${total} | Open: ${open} | Connecting: ${connecting} | Closed: ${closed}`,
+    );
+  }
+
+  private async cleanupClosedSessions(): Promise<void> {
+    const closedSessions = this.getAllSessions().filter((s) => s.status === "closed");
+
+    for (const session of closedSessions) {
+      log.info(`WTS_SERVICE: Cleaning up closed session: ${session.token}`);
+      await this.removeSession(session.token);
+    }
+  }
+
+  private async sendMessageWTyping(token: string, jid: string, msg: string): Promise<void> {
+    const session = this.getSession(token);
+    if (!session) {
+      log.error(`WTS_SERVICE: Session not found for token: ${token}`);
+      throw new Error("Session not found");
+    }
+
     try {
-      const sessionTokenPathName = await fs.readdir(pathSessions);
-      sessionTokenPathName.forEach(async (token) => {
-        const sessionData = await redis.get(`wtsapi:${token}`);
+      if (session.socket.ws.isClosed) {
+        log.warn(`WTS_SERVICE: WebSocket closed, attempting to reconnect... | Session: ${token}`);
+        session.socket.ws.connect();
+        await delay(2000);
+      }
+
+      await session.socket.presenceSubscribe(jid);
+      await delay(500);
+
+      await session.socket.sendPresenceUpdate("composing", jid);
+      await delay(4000);
+
+      await session.socket.sendMessage(jid, { text: msg });
+
+      await delay(1000);
+      await session.socket.sendPresenceUpdate("paused", jid);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      Sentry.captureException(err);
+      log.error(`WTS_SERVICE: Error sending typing message in session ${token}`, errorMessage);
+      throw err;
+    }
+  }
+
+  private async sendMessageImage(token: string, jid: string, message: SendMessageDto): Promise<void> {
+    const session = this.getSession(token);
+    if (!session) {
+      log.error(`WTS_SERVICE: Session not found for token: ${token}`);
+      throw new Error("Session not found");
+    }
+
+    try {
+      if (session.socket.ws.isClosed) {
+        log.warn(`WTS_SERVICE: WebSocket closed, attempting to reconnect... | Session: ${token}`);
+        session.socket.ws.connect();
+        await delay(2000);
+      }
+
+      await session.socket.presenceSubscribe(jid);
+      await delay(3000);
+
+      const base64Data = message.metadata.body.replace(/^data:image\/\w+;base64,/, "");
+      const imageBuffer = Buffer.from(base64Data, "base64");
+
+      const matches = message.metadata.body.match(/^data:image\/(\w+);base64,/);
+      const extension = matches?.[1] || "jpg";
+
+      const tempDir = path.join(process.cwd(), "temp");
+      await fs.mkdir(tempDir, { recursive: true });
+
+      const fileName = `${Date.now()}_${token}.${extension}`;
+      const tempPath = path.join(tempDir, fileName);
+
+      await fs.writeFile(tempPath, imageBuffer);
+
+      await session.socket.sendMessage(jid, {
+        image: { url: tempPath },
+        caption: message.metadata.title || "",
+      });
+
+      await fs.unlink(tempPath);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      Sentry.captureException(err);
+      log.error(`WTS_SERVICE: Error sending image message in session ${token}`, errorMessage);
+      throw err;
+    }
+  }
+
+  private async startSessionsAlreadyRegistered() {
+    const session_path = path.join(process.cwd(), "sessions");
+
+    try {
+      const session_token_path_name = await fs.readdir(session_path);
+
+      session_token_path_name.forEach(async (token) => {
+        const sessionData = await getSessionCache(token);
+
         if (sessionData) {
           const sessionExternal: SessionExternalProps = JSON.parse(sessionData);
 
@@ -79,217 +228,171 @@ new (class WtsMainService {
 
           this.onSessionStart(sessionExternal);
         } else {
-          log.info(`WTS_SERVICE: No session data found in Redis for token: ${token}`);
+          log.info(`WTS_SERVICE: No session data found in sessions_cache for token: ${token}`);
         }
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
       Sentry.captureException(err);
-      log.error("WTS_SERVICE: Error starting all registered sessions", errorMessage);
+      log.error("WTS_SERVICE: Error starting already registered sessions", errorMessage);
     }
   }
 
   private async onSessionStart(data: SessionExternalProps) {
     try {
-      let countRetryConnect = 0;
+      const existingSession = this.getSession(data.token);
+
+      if (existingSession && existingSession.status === "open") {
+        await publishEvent("sessions", QUEUE_KEYS.SESSION_STARTED, { token: data.token });
+        log.warn(`WTS_SERVICE: Session already exists and is open for token: ${data.token}`);
+        return;
+      }
+
+      if (existingSession && existingSession.status === "closed") {
+        log.info(`WTS_SERVICE: Removing closed session before creating new one: ${data.token}`);
+        await this.removeSession(data.token);
+      }
+
+      const retryCount = existingSession?.retryCount || 0;
+      if (retryCount > 5) {
+        log.error(`WTS_SERVICE: Max retry connection reached for session ${data.token}`, {});
+        await this.removeSession(data.token);
+        return;
+      }
+
       log.info(`WTS_SERVICE: Starting WhatsApp session for token: ${data.token}`);
 
       logger.level = "silent";
 
-      if (countRetryConnect > 5) {
-        log.error(`WTS_SERVICE: Max retry connection reached for session ${data.token}`, {});
-        return;
-      }
-
       const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${data.token}`);
 
-      const whatsapp = makeWASocket({ auth: state, logger: logger, browser: ["Windows", "Chrome", "10.0"] });
+      const whatsapp = makeWASocket({
+        auth: state,
+        logger: logger,
+        browser: Browsers.ubuntu("Chrome"),
+        qrTimeout: 60_000,
+      });
 
-      const sendMessageWTyping = async (jid: string, msg: AnyMessageContent) => {
-        try {
-          if (whatsapp.ws.isClosed) {
-            whatsapp.ws.connect();
-
-            await delay(2000);
-          }
-
-          await whatsapp.presenceSubscribe(jid);
-          await delay(500);
-
-          await whatsapp.sendPresenceUpdate("composing", jid);
-          await delay(4000);
-
-          await whatsapp.sendMessage(jid, msg);
-
-          await delay(1000);
-          await whatsapp.sendPresenceUpdate("paused", jid);
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : "Unknown error";
-
-          Sentry.captureException(err);
-
-          log.error(`WTS_SERVICE: Error sending typing message in session ${data.token}`, errorMessage);
-        }
+      const sessionData: SessionData = {
+        socket: whatsapp,
+        token: data.token,
+        props: data,
+        status: "connecting",
+        retryCount: retryCount,
+        queueInitialized: false,
       };
 
-      const sendMessageImage = async (jid: string, message: SendMessageDto) => {
-        try {
-          if (whatsapp.ws.isClosed) {
-            whatsapp.ws.connect();
-
-            await delay(2000);
-          }
-
-          await whatsapp.presenceSubscribe(jid);
-          await delay(3000);
-
-          const base64Data = message.metadata.body.replace(/^data:image\/\w+;base64,/, "");
-          const imageBuffer = Buffer.from(base64Data, "base64");
-
-          const matches = message.metadata.body.match(/^data:image\/(\w+);base64,/);
-          const extension = matches?.[1] || "jpg";
-
-          const tempDir = path.join(process.cwd(), "temp");
-          await fs.mkdir(tempDir, { recursive: true });
-
-          const fileName = `${Date.now()}_${data.token}.${extension}`;
-          const tempPath = path.join(tempDir, fileName);
-
-          await fs.writeFile(tempPath, imageBuffer);
-
-          await whatsapp.sendMessage(jid, {
-            image: { url: tempPath },
-            caption: message.metadata.title || "",
-          });
-
-          await fs.unlink(tempPath);
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : "Unknown error";
-
-          Sentry.captureException(err);
-          log.error(`WTS_SERVICE: Error sending image message in session ${data.token}`, errorMessage);
-        }
-      };
+      this.sessions.set(data.token, sessionData);
+      log.info(`WTS_SERVICE: Session stored in memory: ${data.token}`);
 
       whatsapp.ev.process(async (events) => {
         if (events["connection.update"]) {
           const { connection, lastDisconnect, qr } = events["connection.update"];
-
           const status = (lastDisconnect?.error as Boom)?.output?.statusCode;
+          const session = this.getSession(data.token);
+
+          if (!session) {
+            log.error(`WTS_SERVICE: Session not found in memory during connection update: ${data.token}`);
+            return;
+          }
 
           switch (connection) {
             case "open": {
-              countRetryConnect = 0;
+              session.status = "open";
+              session.retryCount = 0;
+
               log.info(`WTS_SERVICE: WhatsApp connected successfully | Session: ${data.token}`);
 
               await publishEvent("sessions", QUEUE_KEYS.SESSION_STARTED, { token: data.token });
+              await saveSessionCache(data.token, JSON.stringify(data));
 
-              await redis.set(`wtsapi:${data.token}`, JSON.stringify(data));
+              if (!session.queueInitialized) {
+                const sendQueue = PRODUCER_QUEUES_KEYS.SEND_MESSAGE(data.token);
+                await pgBoss.createQueue(sendQueue);
 
-              const worker_messages = new Worker(
-                QUEUE_KEYS.SEND_MESSAGE(data.token),
-                async (messageQueue) => {
-                  try {
-                    const message: SendMessageDto = messageQueue.data;
+                await pgBoss.work(sendQueue, async (job: JobData[]) => {
+                  if (!job) return;
 
-                    const recipients = Array.isArray(message.metadata.to) ? message.metadata.to : [message.metadata.to];
+                  const jobObjString = job[0];
+                  const jobObj: SendMessageDto = JSON.parse(jobObjString.data);
 
-                    switch (message.type) {
-                      case "image": {
-                        for (const recipient of recipients) {
-                          const jid = `${recipient}@c.us`;
-
-                          log.info(`WTS_SERVICE: Sending image message to ${recipient} in session ${data.token}`);
-
-                          await sendMessageImage(jid, message);
-                        }
-                        break;
-                      }
-                      case "text":
-                      default: {
-                        for (const recipient of recipients) {
-                          const jid = `${recipient}@c.us`;
-
-                          log.info(`WTS_SERVICE: Sending message to ${recipient} in session ${data.token}`);
-
-                          await sendMessageWTyping(jid, {
-                            text: message.metadata.body,
-                          });
-                        }
-                        break;
-                      }
-                    }
-                  } catch (err) {
-                    const errorMessage = err instanceof Error ? err.message : "Unknown error";
-
-                    Sentry.captureException(err);
-
-                    log.error(`WTS_SERVICE: Error sending message in session ${data.token}`, errorMessage);
+                  if (!this.isSessionOpen(data.token)) {
+                    log.warn(`WTS_SERVICE: Cannot send message, session is not open: ${data.token}`);
+                    return;
                   }
-                },
-                {
-                  connection: redis,
-                }
-              );
 
-              worker_messages.on("completed", (job) => {
-                log.info(`Worker message ${job.id} has completed!`);
-              });
+                  console.log(`WTS_SERVICE: Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
+                  const recipients = Array.isArray(jobObj.metadata.to) ? jobObj.metadata.to : [jobObj.metadata.to];
 
-              worker_messages.on("failed", (job, err) => {
-                log.error(`Worker message ${job?.id} has failed with ${err.message}`);
-              });
+                  for (const recipient of recipients) {
+                    const jid = `${recipient}@c.us`;
+
+                    try {
+                      if (jobObj.type === "image") {
+                        await this.sendMessageImage(data.token, jid, jobObj);
+                      } else {
+                        await this.sendMessageWTyping(data.token, jid, jobObj.metadata.body);
+                      }
+                    } catch (err) {
+                      log.error(`WTS_SERVICE: Failed to send message to ${recipient}`, err);
+                    }
+                  }
+                });
+
+                session.queueInitialized = true;
+              }
 
               break;
             }
             case "close": {
+              session.status = "closed";
+
               switch (status) {
                 case DisconnectReason.badSession:
                   log.info(
-                    `WTS_SERVICE: Bad session file, please delete session and scan again | Session: ${data.token}`
+                    `WTS_SERVICE: Bad session file, please delete session and scan again | Session: ${data.token}`,
                   );
-                  countRetryConnect += 1;
-
+                  session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.connectionClosed:
                   log.info(`WTS_SERVICE: Connection closed, reconnecting... | Session: ${data.token}`);
-                  countRetryConnect += 1;
-
+                  session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.connectionLost:
                   log.info(`WTS_SERVICE: Connection lost from WhatsApp, reconnecting... | Session: ${data.token}`);
-                  countRetryConnect += 1;
-
+                  session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.connectionReplaced:
                   log.info(
-                    `WTS_SERVICE: Connection replaced by another session, logging out... | Session: ${data.token}`
+                    `WTS_SERVICE: Connection replaced by another session, logging out... | Session: ${data.token}`,
                   );
+                  await this.removeSession(data.token);
+                  await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
                   break;
                 case DisconnectReason.loggedOut:
                   log.info(`WTS_SERVICE: Device logged out, please scan again | Session: ${data.token}`);
+                  await this.removeSession(data.token);
+                  await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
                   break;
                 case DisconnectReason.restartRequired:
                   log.info(`WTS_SERVICE: Restart required, restarting... | Session: ${data.token}`);
-                  countRetryConnect += 1;
-
+                  session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.multideviceMismatch:
                   log.info(`WTS_SERVICE: Connection timeout, reconnecting... | Session: ${data.token}`);
-                  countRetryConnect += 1;
-
+                  session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
                 default:
                   log.info(
-                    `WTS_SERVICE: Unknown disconnect reason: ${status}| Session: ${data.token}, reconnecting...`
+                    `WTS_SERVICE: Unknown disconnect reason: ${status}| Session: ${data.token}, reconnecting...`,
                   );
-                  countRetryConnect += 1;
-
+                  session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
               }
@@ -297,9 +400,6 @@ new (class WtsMainService {
               break;
             }
             default: {
-              log.info(
-                `WTS_SERVICE: Connection update | Session: ${data.token} | Status: ${connection} | Reason: ${status}`
-              );
               break;
             }
           }
@@ -307,10 +407,7 @@ new (class WtsMainService {
           if (qr) {
             log.info(`WTS_SERVICE: QR Code generated for ${data.token} - ${new Date().toLocaleTimeString()}`);
 
-            await publishEvent("sessions", QUEUE_KEYS.SESSION_QRCODE, {
-              token: data.token,
-              qrCode: qr,
-            });
+            await publishEvent("sessions", QUEUE_KEYS.SESSION_QRCODE, { token: data.token, qrCode: qr });
           }
         }
 
@@ -323,7 +420,7 @@ new (class WtsMainService {
               for (const msg of upsert.messages) {
                 if (msg.key.fromMe || !msg.key.remoteJid || !msg.message) {
                   log.info(
-                    `WTS_SERVICE: Ignoring message (from self, missing remoteJid, or missing content)... | Session: ${data.token}`
+                    `WTS_SERVICE: Ignoring message (from self, missing remoteJid, or missing content)... | Session: ${data.token}`,
                   );
                   continue;
                 }
@@ -336,7 +433,7 @@ new (class WtsMainService {
                   remoteJid === "status@broadcast" // status
                 ) {
                   log.info(
-                    `WTS_SERVICE: Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`
+                    `WTS_SERVICE: Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`,
                   );
                   continue;
                 }
@@ -410,72 +507,52 @@ new (class WtsMainService {
         }
       });
 
-      const worker_manager = new Worker(
-        QUEUE_KEYS.SESSION_MANAGER(data.token),
-        async (msg) => {
-          interface MsgProps {
-            event: string;
-            data: object;
-          }
+      const MANAGER_QUEUE = PRODUCER_QUEUES_KEYS.SESSION_MANAGER(data.token);
 
-          const dataEvent: MsgProps = msg.data;
+      await pgBoss.createQueue(MANAGER_QUEUE);
 
-          switch (dataEvent.event) {
-            case "disconnect_session": {
-              try {
-                log.info(`WTS_SERVICE: Disconnecting session: ${data.token}`);
-
-                await whatsapp.logout();
-
-                log.info(`WTS_SERVICE: Session destroyed: ${data.token}`);
-
-                await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
-
-                const sessionsDir = path.resolve(process.cwd(), "sessions");
-                const sessionPath = path.join(sessionsDir, data.token);
-
-                fs.rm(sessionPath, { recursive: true, force: true })
-                  .then(() => {
-                    log.info(`WTS_SERVICE: Session files removed for ${data.token}`);
-                  })
-                  .catch((err) => {
-                    Sentry.captureException(err);
-                    log.error(`WTS_SERVICE: Error removing session files for ${data.token}`, err);
-                  });
-
-                await redis.del(`wtsapi:${data.token}`);
-
-                log.info(`WTS_SERVICE: Removing session files for ${data.token}`);
-
-                await whatsapp.logout();
-              } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : "Unknown error";
-
-                Sentry.captureException(err);
-
-                log.error(`WTS_SERVICE: Error disconnecting session ${data.token}`, errorMessage);
-              }
-
-              break;
-            }
-            case "send_typing_event": {
-              break;
-            }
-            default:
-              log.info(`WTS_SERVICE: Session manager event not found`);
-          }
-        },
-        {
-          connection: redis,
+      await pgBoss.work(MANAGER_QUEUE, async (job: JobData[]) => {
+        if (!job) return;
+        interface MsgProps {
+          event: string;
+          data: object;
         }
-      );
 
-      worker_manager.on("completed", (job) => {
-        log.info(` Worker manager ${job.id} has completed!`);
-      });
+        const jobObjString = job[0];
+        const jobObj: MsgProps = JSON.parse(jobObjString.data);
+        const { event } = jobObj;
 
-      worker_manager.on("failed", (job, err) => {
-        log.error(` Worker manager ${job?.id} has failed with ${err.message}`);
+        if (event === "disconnect_session") {
+          try {
+            log.info(`WTS_SERVICE: Disconnecting session: ${data.token}`);
+
+            // Remover da memória e fazer logout
+            await this.removeSession(data.token);
+
+            log.info(`WTS_SERVICE: Session destroyed: ${data.token}`);
+
+            await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
+            await deleteSessionCache(data.token);
+
+            const sessionsDir = path.resolve(process.cwd(), "sessions");
+            const sessionPath = path.join(sessionsDir, data.token);
+
+            fs.rm(sessionPath, { recursive: true, force: true })
+              .then(() => {
+                log.info(`WTS_SERVICE: Session files removed for ${data.token}`);
+              })
+              .catch((err) => {
+                Sentry.captureException(err);
+                log.error(`WTS_SERVICE: Error removing session files for ${data.token}`, err);
+              });
+          } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+            Sentry.captureException(err);
+
+            log.error(`WTS_SERVICE: Error disconnecting session ${data.token}`, errorMessage);
+          }
+        }
       });
 
       whatsapp.ev.on("creds.update", saveCreds);
@@ -486,6 +563,7 @@ new (class WtsMainService {
 
       Sentry.captureException(err);
 
+      await this.removeSession(data.token);
       await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
       return;
     }

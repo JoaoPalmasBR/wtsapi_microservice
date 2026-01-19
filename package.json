@@ -10,8 +10,7 @@
     "start:prod": "node dist/main.js",
     "build": "rm -rf ./dist && tsc",
     "dev": "ts-node src/main.ts",
-    "dev:watch": "nodemon --ignore sessions/** --exec ts-node src/main.ts",
-    "dev:watch2": "nodemon --exec ts-node src/main.ts",
+    "dev:watch": "nodemon --exec ts-node src/main.ts",
     "sentry:sourcemaps": "sentry-cli sourcemaps inject --org dc-sistemas --project simplix-wts-service ../../../../../../dist && sentry-cli sourcemaps upload --org dc-sistemas --project simplix-wts-service ../../../../../../dist"
   },
   "dependencies": {
@@ -19,12 +18,12 @@
     "@hapi/boom": "^10.0.1",
     "@sentry/node": "^10.7.0",
     "baileys": "7.0.0-rc.9",
-    "bullmq": "^5.61.0",
     "dotenv": "^16.5.0",
     "ioredis": "^5.6.1",
     "nodemon": "^3.1.10",
     "open": "^10.1.2",
     "pg": "^8.16.3",
+    "pg-boss": "^12.5.4",
     "pino": "^9.7.0",
     "pino-pretty": "^13.1.3",
     "qrcode": "^1.5.4",
