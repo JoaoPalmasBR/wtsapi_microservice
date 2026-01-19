@@ -50,14 +50,14 @@ new (class WtsMainService {
   constructor() {
     this.onInit();
 
-    const INTERVAL_TIME = 5 * 60 * 1000; // 5 minutos
+    const INTERVAL_TIME = 5 * 60 * 1000;
 
     setInterval(() => {
       this.logSessionsStatus();
       this.cleanupClosedSessions();
     }, INTERVAL_TIME);
 
-    const RESTART_INTERVAL_TIME = 15 * 60 * 1000; // 15 minutos
+    const RESTART_INTERVAL_TIME = 15 * 60 * 1000;
 
     setInterval(() => {
       this.reStartSessionClosed();
@@ -105,15 +105,19 @@ new (class WtsMainService {
 
             log.info(`Restarting session for token: ${token}`);
 
-            this.onSessionStart(sessionExternal);
+            await this.onSessionStart(sessionExternal);
+          } else {
+            log.warn(`No session data found in cache for token: ${token}, skipping restart.`);
           }
+        } else {
+          log.info(`Session ${token} is already open, skipping restart.`);
         }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
       Sentry.captureException(err);
-      log.error("Error restarting already registered sessions", errorMessage);
+      log.error("Error in restarting closed sessions", errorMessage);
     }
   }
 
