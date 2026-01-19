@@ -92,23 +92,23 @@ new (class WtsMainService {
       log.info("Restarting closed sessions...");
       const session_token_path_name = await fs.readdir(session_path);
 
-      session_token_path_name.forEach(async (token) => {
+      log.info(`Found ${session_token_path_name.length} sessions to check for restart.`);
+
+      for (const token of session_token_path_name) {
         const session = this.getSession(token);
 
         if (!session || session.status !== "open") {
-          const sessionData = await getSessionCache(token);
+          const session_data = await getSessionCache(token);
 
-          if (sessionData) {
-            const sessionExternal: SessionExternalProps = JSON.parse(sessionData);
+          if (session_data) {
+            const sessionExternal: SessionExternalProps = JSON.parse(session_data);
 
             log.info(`Restarting session for token: ${token}`);
 
             this.onSessionStart(sessionExternal);
-          } else {
-            log.info(`No session data found in sessions_cache for token: ${token}`);
           }
         }
-      });
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
@@ -159,9 +159,7 @@ new (class WtsMainService {
     const connecting = this.getAllSessions().filter((s) => s.status === "connecting").length;
     const closed = this.getAllSessions().filter((s) => s.status === "closed").length;
 
-    log.info(
-      `Sessions Status - Total: ${total} | Open: ${open} | Connecting: ${connecting} | Closed: ${closed}`,
-    );
+    log.info(`Sessions Status - Total: ${total} | Open: ${open} | Connecting: ${connecting} | Closed: ${closed}`);
   }
 
   private async cleanupClosedSessions(): Promise<void> {
@@ -388,9 +386,7 @@ new (class WtsMainService {
 
               switch (status) {
                 case DisconnectReason.badSession:
-                  log.info(
-                    `Bad session file, please delete session and scan again | Session: ${data.token}`,
-                  );
+                  log.info(`Bad session file, please delete session and scan again | Session: ${data.token}`);
                   session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
@@ -405,9 +401,7 @@ new (class WtsMainService {
                   this.onSessionStart(data);
                   break;
                 case DisconnectReason.connectionReplaced:
-                  log.info(
-                    `Connection replaced by another session, logging out... | Session: ${data.token}`,
-                  );
+                  log.info(`Connection replaced by another session, logging out... | Session: ${data.token}`);
                   await this.removeSession(data.token);
                   await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
                   break;
@@ -427,9 +421,7 @@ new (class WtsMainService {
                   this.onSessionStart(data);
                   break;
                 default:
-                  log.info(
-                    `Unknown disconnect reason: ${status}| Session: ${data.token}, reconnecting...`,
-                  );
+                  log.info(`Unknown disconnect reason: ${status}| Session: ${data.token}, reconnecting...`);
                   session.retryCount += 1;
                   this.onSessionStart(data);
                   break;
@@ -470,9 +462,7 @@ new (class WtsMainService {
                   remoteJid.endsWith("@broadcast") || // status
                   remoteJid === "status@broadcast" // status
                 ) {
-                  log.info(
-                    `Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`,
-                  );
+                  log.info(`Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`);
                   continue;
                 }
 
