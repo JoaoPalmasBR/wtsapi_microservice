@@ -5,6 +5,7 @@ import Sentry from "@sentry/node";
 import { Boom } from "@hapi/boom";
 
 import makeWASocket, {
+  BinaryNode,
   Browsers,
   delay,
   DisconnectReason,
@@ -252,6 +253,59 @@ new (class WtsMainService {
     }
   }
 
+  private async sendAudioMessage(token: string, jid: string, message: SendMessageDto): Promise<void> {
+    const session = this.getSession(token);
+    if (!session) {
+      log.error(`Session not found for token: ${token}`);
+      throw new Error("Session not found");
+    }
+
+    try {
+      if (session.socket.ws.isClosed) {
+        log.warn(`WebSocket closed, attempting to reconnect... | Session: ${token}`);
+        session.socket.ws.connect();
+        await delay(2000);
+      }
+
+      await session.socket.presenceSubscribe(jid);
+      await delay(3000);
+
+      await session.socket.sendPresenceUpdate("recording", jid);
+
+      const base64Data = message.metadata.body.replace(/^data:audio\/\w+;base64,/, "");
+      const audioBuffer = Buffer.from(base64Data, "base64");
+
+      const matches = message.metadata.body.match(/^data:audio\/(\w+);base64,/);
+      const extension = matches?.[1] || "mp3";
+      const tempDir = path.join(process.cwd(), "temp");
+      await fs.mkdir(tempDir, { recursive: true });
+
+      const audio_minutes = audioBuffer.length / (16_000 * 2 * 2);
+      const audio_seconds = Math.ceil(audio_minutes * 60);
+
+      await delay(Math.min(audio_seconds * 1000, 10_000));
+
+      await session.socket.sendPresenceUpdate("paused", jid);
+
+      const fileName = `${Date.now()}_${token}.${extension}`;
+      const tempPath = path.join(tempDir, fileName);
+
+      await fs.writeFile(tempPath, audioBuffer);
+
+      await session.socket.sendMessage(jid, {
+        audio: { url: tempPath },
+        caption: message.metadata.title || "",
+      });
+
+      await fs.unlink(tempPath);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      Sentry.captureException(err);
+      log.error(`Error sending image message in session ${token}`, errorMessage);
+      throw err;
+    }
+  }
+
   private async startSessionsAlreadyRegistered() {
     const session_path = path.join(process.cwd(), "sessions");
 
@@ -362,17 +416,23 @@ new (class WtsMainService {
                     return;
                   }
 
-                  console.log(`Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
+                  log.info(`Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
                   const recipients = Array.isArray(jobObj.metadata.to) ? jobObj.metadata.to : [jobObj.metadata.to];
 
                   for (const recipient of recipients) {
                     const jid = `${recipient}@c.us`;
 
                     try {
-                      if (jobObj.type === "image") {
-                        await this.sendMessageImage(data.token, jid, jobObj);
-                      } else {
-                        await this.sendMessageWTyping(data.token, jid, jobObj.metadata.body);
+                      switch (jobObj.type) {
+                        case "audio":
+                          await this.sendAudioMessage(data.token, jid, jobObj);
+                          break;
+                        case "image":
+                          await this.sendMessageImage(data.token, jid, jobObj);
+                          break;
+                        default:
+                          await this.sendMessageWTyping(data.token, jid, jobObj.metadata.body);
+                          break;
                       }
                     } catch (err) {
                       log.error(`Failed to send message to ${recipient}`, err);
@@ -466,7 +526,6 @@ new (class WtsMainService {
                   remoteJid.endsWith("@broadcast") || // status
                   remoteJid === "status@broadcast" // status
                 ) {
-                  log.info(`Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`);
                   continue;
                 }
 
