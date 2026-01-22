@@ -13,6 +13,8 @@ export const APP_CONFIG = {
 export const QUEUE_KEYS = {
   EVENTS: "wtsapi.events",
   SESSION_START: "wtsapi.session.start.main",
+  SESSION_CREATE: "wtsapi.session.create",
+  SESSION_DELETE: "wtsapi.session.delete",
   SEND_NOTIFICATION: "wtsapi.send.notification",
   SESSION_AUTH_FAILURE: "wtsapi.session.auth_failure",
   SESSION: "wtsapi.session",

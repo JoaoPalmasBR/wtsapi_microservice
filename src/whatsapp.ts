@@ -49,7 +49,7 @@ new (class WtsMainService {
   private sessions: Map<string, SessionData> = new Map();
 
   constructor() {
-    this.onInit();
+    this.main();
 
     const INTERVAL_TIME = 5 * 60 * 1000;
 
@@ -65,12 +65,35 @@ new (class WtsMainService {
     }, RESTART_INTERVAL_TIME);
   }
 
-  private async onInit() {
+  private async main() {
     log.info("Initializing WTS Main Service...");
 
     await publishEvent("sessions", QUEUE_KEYS.DISABLE_ALL_SESSIONS, {});
 
     await this.startSessionsAlreadyRegistered();
+
+    await pgBoss.work(QUEUE_KEYS.SESSION_CREATE, async (job: JobData[]) => {
+      if (!job) {
+        log.warn("Received empty message in session create consumer, ignoring...");
+        return;
+      }
+
+      try {
+        const jobObjString = job[0];
+        const jobObj: SessionExternalProps = JSON.parse(jobObjString.data);
+
+        log.info(`Received session create request for token: ${jobObj.token}`);
+
+        Object.keys(PRODUCER_QUEUES_KEYS).forEach(async (key) => {
+          const queueName = (PRODUCER_QUEUES_KEYS as any)[key](jobObj.token);
+          await pgBoss.createQueue(queueName);
+        });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+        log.error("Error parsing session create job data", errorMessage);
+      }
+    });
 
     await pgBoss.work(QUEUE_KEYS.SESSION_START, async (job: JobData[]) => {
       if (!job) {
@@ -420,7 +443,7 @@ new (class WtsMainService {
                   const recipients = Array.isArray(jobObj.metadata.to) ? jobObj.metadata.to : [jobObj.metadata.to];
 
                   for (const recipient of recipients) {
-                    const jid = `${recipient}@c.us`;
+                    const jid = `${recipient}@s.whatsapp.net`;
 
                     try {
                       switch (jobObj.type) {
