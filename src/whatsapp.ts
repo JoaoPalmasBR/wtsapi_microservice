@@ -5,6 +5,7 @@ import Sentry from "@sentry/node";
 import { Boom } from "@hapi/boom";
 
 import makeWASocket, {
+  BinaryNode,
   Browsers,
   delay,
   DisconnectReason,
@@ -48,7 +49,7 @@ new (class WtsMainService {
   private sessions: Map<string, SessionData> = new Map();
 
   constructor() {
-    this.onInit();
+    this.main();
 
     const INTERVAL_TIME = 5 * 60 * 1000;
 
@@ -64,12 +65,35 @@ new (class WtsMainService {
     }, RESTART_INTERVAL_TIME);
   }
 
-  private async onInit() {
+  private async main() {
     log.info("Initializing WTS Main Service...");
 
     await publishEvent("sessions", QUEUE_KEYS.DISABLE_ALL_SESSIONS, {});
 
     await this.startSessionsAlreadyRegistered();
+
+    await pgBoss.work(QUEUE_KEYS.SESSION_CREATE, async (job: JobData[]) => {
+      if (!job) {
+        log.warn("Received empty message in session create consumer, ignoring...");
+        return;
+      }
+
+      try {
+        const jobObjString = job[0];
+        const jobObj: SessionExternalProps = JSON.parse(jobObjString.data);
+
+        log.info(`Received session create request for token: ${jobObj.token}`);
+
+        Object.keys(PRODUCER_QUEUES_KEYS).forEach(async (key) => {
+          const queueName = (PRODUCER_QUEUES_KEYS as any)[key](jobObj.token);
+          await pgBoss.createQueue(queueName);
+        });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+        log.error("Error parsing session create job data", errorMessage);
+      }
+    });
 
     await pgBoss.work(QUEUE_KEYS.SESSION_START, async (job: JobData[]) => {
       if (!job) {
@@ -252,6 +276,59 @@ new (class WtsMainService {
     }
   }
 
+  private async sendAudioMessage(token: string, jid: string, message: SendMessageDto): Promise<void> {
+    const session = this.getSession(token);
+    if (!session) {
+      log.error(`Session not found for token: ${token}`);
+      throw new Error("Session not found");
+    }
+
+    try {
+      if (session.socket.ws.isClosed) {
+        log.warn(`WebSocket closed, attempting to reconnect... | Session: ${token}`);
+        session.socket.ws.connect();
+        await delay(2000);
+      }
+
+      await session.socket.presenceSubscribe(jid);
+      await delay(3000);
+
+      await session.socket.sendPresenceUpdate("recording", jid);
+
+      const base64Data = message.metadata.body.replace(/^data:audio\/\w+;base64,/, "");
+      const audioBuffer = Buffer.from(base64Data, "base64");
+
+      const matches = message.metadata.body.match(/^data:audio\/(\w+);base64,/);
+      const extension = matches?.[1] || "mp3";
+      const tempDir = path.join(process.cwd(), "temp");
+      await fs.mkdir(tempDir, { recursive: true });
+
+      const audio_minutes = audioBuffer.length / (16_000 * 2 * 2);
+      const audio_seconds = Math.ceil(audio_minutes * 60);
+
+      await delay(Math.min(audio_seconds * 1000, 10_000));
+
+      await session.socket.sendPresenceUpdate("paused", jid);
+
+      const fileName = `${Date.now()}_${token}.${extension}`;
+      const tempPath = path.join(tempDir, fileName);
+
+      await fs.writeFile(tempPath, audioBuffer);
+
+      await session.socket.sendMessage(jid, {
+        audio: { url: tempPath },
+        caption: message.metadata.title || "",
+      });
+
+      await fs.unlink(tempPath);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      Sentry.captureException(err);
+      log.error(`Error sending image message in session ${token}`, errorMessage);
+      throw err;
+    }
+  }
+
   private async startSessionsAlreadyRegistered() {
     const session_path = path.join(process.cwd(), "sessions");
 
@@ -362,17 +439,23 @@ new (class WtsMainService {
                     return;
                   }
 
-                  console.log(`Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
+                  log.info(`Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
                   const recipients = Array.isArray(jobObj.metadata.to) ? jobObj.metadata.to : [jobObj.metadata.to];
 
                   for (const recipient of recipients) {
-                    const jid = `${recipient}@c.us`;
+                    const jid = `${recipient}@s.whatsapp.net`;
 
                     try {
-                      if (jobObj.type === "image") {
-                        await this.sendMessageImage(data.token, jid, jobObj);
-                      } else {
-                        await this.sendMessageWTyping(data.token, jid, jobObj.metadata.body);
+                      switch (jobObj.type) {
+                        case "audio":
+                          await this.sendAudioMessage(data.token, jid, jobObj);
+                          break;
+                        case "image":
+                          await this.sendMessageImage(data.token, jid, jobObj);
+                          break;
+                        default:
+                          await this.sendMessageWTyping(data.token, jid, jobObj.metadata.body);
+                          break;
                       }
                     } catch (err) {
                       log.error(`Failed to send message to ${recipient}`, err);
@@ -466,7 +549,6 @@ new (class WtsMainService {
                   remoteJid.endsWith("@broadcast") || // status
                   remoteJid === "status@broadcast" // status
                 ) {
-                  log.info(`Mensagem recebida não é de contato individual, ignorando... | Session: ${data.token}`);
                   continue;
                 }
 
