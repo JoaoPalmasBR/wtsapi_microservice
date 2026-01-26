@@ -27,11 +27,13 @@ export const QUEUE_KEYS = {
   SESSION_DISCONNECTED: "BlibsendBackend.Queues.Sessions.QueueStatusDisconnected",
   DISABLE_ALL_SESSIONS: "BlibsendBackend.Queues.Sessions.QueueDisableAllSessions",
   SEND_MESSAGE_TO_WEBHOOK: "BlibsendBackend.Queues.Sessions.QueueSendMessageToWebhook",
+  UPDATE_OR_CREATE_GROUP_INFO: "BlibsendBackend.Queues.Sessions.QueueUpdateOrCreateGroupsInfo",
 } as const;
 
 export const PRODUCER_QUEUES_KEYS = {
   SESSION: (token: string) => `wtsapi.${token}`,
   SEND_MESSAGE: (token: string) => `wtsapi.${token}.send.message`,
+  GROUP_SEND_MESSAGE: (token: string) => `wtsapi.${token}.group.send.message`,
   SESSION_MANAGER: (token: string) => `wtsapi.${token}.session.manager`,
 };
 
