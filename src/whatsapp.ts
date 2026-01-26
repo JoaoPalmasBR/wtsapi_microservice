@@ -329,6 +329,51 @@ new (class WtsMainService {
     }
   }
 
+  private async sendStickerMessage(token: string, jid: string, message: SendMessageDto): Promise<void> {
+    const session = this.getSession(token);
+    if (!session) {
+      log.error(`Session not found for token: ${token}`);
+      throw new Error("Session not found");
+    }
+
+    try {
+      if (session.socket.ws.isClosed) {
+        log.warn(`WebSocket closed, attempting to reconnect... | Session: ${token}`);
+        session.socket.ws.connect();
+        await delay(2000);
+      }
+
+      await session.socket.presenceSubscribe(jid);
+      await delay(3000);
+
+      const base64Data = message.metadata.body.replace(/^data:image\/\w+;base64,/, "");
+      const imageBuffer = Buffer.from(base64Data, "base64");
+
+      const matches = message.metadata.body.match(/^data:image\/(\w+);base64,/);
+      const extension = matches?.[1] || "jpg";
+
+      const tempDir = path.join(process.cwd(), "temp");
+      await fs.mkdir(tempDir, { recursive: true });
+
+      const fileName = `${Date.now()}_${token}.${extension}`;
+      const tempPath = path.join(tempDir, fileName);
+
+      await fs.writeFile(tempPath, imageBuffer);
+
+      await session.socket.sendMessage(jid, {
+        sticker: imageBuffer,
+        caption: message.metadata.title || "",
+      });
+
+      await fs.unlink(tempPath);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      Sentry.captureException(err);
+      log.error(`Error sending sticker message in session ${token}`, errorMessage);
+      throw err;
+    }
+  }
+
   private async startSessionsAlreadyRegistered() {
     const session_path = path.join(process.cwd(), "sessions");
 
@@ -424,6 +469,63 @@ new (class WtsMainService {
               await publishEvent("sessions", QUEUE_KEYS.SESSION_STARTED, { token: data.token });
               await saveSessionCache(data.token, JSON.stringify(data));
 
+              const allGroups = await whatsapp.groupFetchAllParticipating();
+              const groupsArray = Object.values(allGroups);
+
+              const BATCH_SIZE = 10;
+              for (let i = 0; i < groupsArray.length; i += BATCH_SIZE) {
+                const batch = groupsArray.slice(i, i + BATCH_SIZE);
+
+                await publishEvent("sessions", QUEUE_KEYS.UPDATE_OR_CREATE_GROUP_INFO, {
+                  metadata: {
+                    token: data.token,
+                    groups: batch.map((group) => {
+                      return {
+                        name: group.subject,
+                        wts_group_id: group.id,
+                        owner: group.owner,
+                        last_updated_at: new Date(),
+                      };
+                    }),
+                  },
+                });
+              }
+
+              const sendMessage = async (toGroup: boolean = false, type: string, messageData: SendMessageDto) => {
+                if (!this.isSessionOpen(data.token)) {
+                  log.warn(`Cannot send message, session is not open: ${data.token}`);
+                  return;
+                }
+
+                log.info(`Sending message | Type: ${type} to ${messageData.metadata.to} | Session: ${data.token}`);
+                const recipients = Array.isArray(messageData.metadata.to)
+                  ? messageData.metadata.to
+                  : [messageData.metadata.to];
+
+                for (const recipient of recipients) {
+                  let destination = toGroup ? recipient : `${recipient}@s.whatsapp.net`;
+
+                  try {
+                    switch (type) {
+                      case "audio":
+                        await this.sendAudioMessage(data.token, destination, messageData);
+                        break;
+                      case "image":
+                        await this.sendMessageImage(data.token, destination, messageData);
+                        break;
+                      case "sticker":
+                        await this.sendStickerMessage(data.token, destination, messageData);
+                        break;
+                      default:
+                        await this.sendMessageWTyping(data.token, destination, messageData.metadata.body);
+                        break;
+                    }
+                  } catch (err) {
+                    log.error(`Failed to send message to ${recipient}`, err);
+                  }
+                }
+              };
+
               if (!session.queueInitialized) {
                 const sendQueue = PRODUCER_QUEUES_KEYS.SEND_MESSAGE(data.token);
                 await pgBoss.createQueue(sendQueue);
@@ -434,33 +536,19 @@ new (class WtsMainService {
                   const jobObjString = job[0];
                   const jobObj: SendMessageDto = JSON.parse(jobObjString.data);
 
-                  if (!this.isSessionOpen(data.token)) {
-                    log.warn(`Cannot send message, session is not open: ${data.token}`);
-                    return;
-                  }
+                  sendMessage(false, jobObj.type, jobObj);
+                });
 
-                  log.info(`Sending message to ${jobObj.metadata.to} | Session: ${data.token}`);
-                  const recipients = Array.isArray(jobObj.metadata.to) ? jobObj.metadata.to : [jobObj.metadata.to];
+                const groupSendQueue = PRODUCER_QUEUES_KEYS.GROUP_SEND_MESSAGE(data.token);
+                await pgBoss.createQueue(groupSendQueue);
 
-                  for (const recipient of recipients) {
-                    const jid = `${recipient}@s.whatsapp.net`;
+                await pgBoss.work(groupSendQueue, async (job: JobData[]) => {
+                  if (!job) return;
 
-                    try {
-                      switch (jobObj.type) {
-                        case "audio":
-                          await this.sendAudioMessage(data.token, jid, jobObj);
-                          break;
-                        case "image":
-                          await this.sendMessageImage(data.token, jid, jobObj);
-                          break;
-                        default:
-                          await this.sendMessageWTyping(data.token, jid, jobObj.metadata.body);
-                          break;
-                      }
-                    } catch (err) {
-                      log.error(`Failed to send message to ${recipient}`, err);
-                    }
-                  }
+                  const jobObjString = job[0];
+                  const jobObj: SendMessageDto = JSON.parse(jobObjString.data);
+
+                  sendMessage(true, jobObj.type, jobObj);
                 });
 
                 session.queueInitialized = true;
@@ -617,6 +705,35 @@ new (class WtsMainService {
             const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
             log.error(`Error in send message to webhook in session ${data.token}`, errorMessage);
+          }
+        }
+
+        if (events["groups.upsert"]) {
+          try {
+            const upsert = events["groups.upsert"];
+
+            const BATCH_SIZE = 10;
+            for (let i = 0; i < upsert.length; i += BATCH_SIZE) {
+              const batch = upsert.slice(i, i + BATCH_SIZE);
+
+              await publishEvent("sessions", QUEUE_KEYS.UPDATE_OR_CREATE_GROUP_INFO, {
+                metadata: {
+                  token: data.token,
+                  groups: batch.map((group) => {
+                    return {
+                      name: group.subject,
+                      wts_group_id: group.id,
+                      owner: group.owner,
+                      last_updated_at: new Date(),
+                    };
+                  }),
+                },
+              });
+            }
+          } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : "Unknown error";
+
+            log.error(`Error in group upsert event in session ${data.token}`, errorMessage);
           }
         }
       });
