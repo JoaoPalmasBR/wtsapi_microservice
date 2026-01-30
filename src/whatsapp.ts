@@ -5,7 +5,6 @@ import Sentry from "@sentry/node";
 import { Boom } from "@hapi/boom";
 
 import makeWASocket, {
-  BinaryNode,
   Browsers,
   delay,
   DisconnectReason,
@@ -245,29 +244,59 @@ new (class WtsMainService {
         await delay(2000);
       }
 
+      let imagesPath: string[] = [];
+
+      if (typeof message.metadata.body === "string") {
+        const base64Data = message.metadata.body.replace(/^data:image\/\w+;base64,/, "");
+        const imageBuffer = Buffer.from(base64Data, "base64");
+
+        const matches = message.metadata.body.match(/^data:image\/(\w+);base64,/);
+        const extension = matches?.[1] || "jpg";
+
+        const tempDir = path.join(process.cwd(), "temp");
+        await fs.mkdir(tempDir, { recursive: true });
+
+        const fileName = `${Date.now()}_${token}.${extension}`;
+        const tempPath = path.join(tempDir, fileName);
+
+        await fs.writeFile(tempPath, imageBuffer);
+
+        imagesPath.push(tempPath);
+      } else {
+        for (const bodyPart of message.metadata.body) {
+          const base64Data = bodyPart.replace(/^data:image\/\w+;base64,/, "");
+          const imageBuffer = Buffer.from(base64Data, "base64");
+
+          const matches = bodyPart.match(/^data:image\/(\w+);base64,/);
+          const extension = matches?.[1] || "jpg";
+
+          const tempDir = path.join(process.cwd(), "temp");
+          await fs.mkdir(tempDir, { recursive: true });
+
+          const fileName = `${Date.now()}_${token}_${Math.floor(Math.random() * 1000)}.${extension}`;
+          const tempPath = path.join(tempDir, fileName);
+
+          await fs.writeFile(tempPath, imageBuffer);
+
+          imagesPath.push(tempPath);
+        }
+      }
+
       await session.socket.presenceSubscribe(jid);
       await delay(3000);
 
-      const base64Data = message.metadata.body.replace(/^data:image\/\w+;base64,/, "");
-      const imageBuffer = Buffer.from(base64Data, "base64");
+      for (let i = 0; i < imagesPath.length; i++) {
+        const image = imagesPath[i];
 
-      const matches = message.metadata.body.match(/^data:image\/(\w+);base64,/);
-      const extension = matches?.[1] || "jpg";
+        await session.socket.sendMessage(jid, {
+          image: { url: image },
+          caption: imagesPath.length === i + 1 ? message.metadata.title || "" : "",
+        });
+      }
 
-      const tempDir = path.join(process.cwd(), "temp");
-      await fs.mkdir(tempDir, { recursive: true });
-
-      const fileName = `${Date.now()}_${token}.${extension}`;
-      const tempPath = path.join(tempDir, fileName);
-
-      await fs.writeFile(tempPath, imageBuffer);
-
-      await session.socket.sendMessage(jid, {
-        image: { url: tempPath },
-        caption: message.metadata.title || "",
-      });
-
-      await fs.unlink(tempPath);
+      for (const imagePath of imagesPath) {
+        await fs.unlink(imagePath);
+      }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       Sentry.captureException(err);
@@ -290,15 +319,17 @@ new (class WtsMainService {
         await delay(2000);
       }
 
+      const body: string = message.metadata.body as string;
+
       await session.socket.presenceSubscribe(jid);
       await delay(3000);
 
       await session.socket.sendPresenceUpdate("recording", jid);
 
-      const base64Data = message.metadata.body.replace(/^data:audio\/\w+;base64,/, "");
+      const base64Data = body.replace(/^data:audio\/\w+;base64,/, "");
       const audioBuffer = Buffer.from(base64Data, "base64");
 
-      const matches = message.metadata.body.match(/^data:audio\/(\w+);base64,/);
+      const matches = body.match(/^data:audio\/(\w+);base64,/);
       const extension = matches?.[1] || "mp3";
       const tempDir = path.join(process.cwd(), "temp");
       await fs.mkdir(tempDir, { recursive: true });
@@ -346,10 +377,12 @@ new (class WtsMainService {
       await session.socket.presenceSubscribe(jid);
       await delay(3000);
 
-      const base64Data = message.metadata.body.replace(/^data:image\/\w+;base64,/, "");
+      const body: string = message.metadata.body as string;
+
+      const base64Data = body.replace(/^data:image\/\w+;base64,/, "");
       const imageBuffer = Buffer.from(base64Data, "base64");
 
-      const matches = message.metadata.body.match(/^data:image\/(\w+);base64,/);
+      const matches = body.match(/^data:image\/(\w+);base64,/);
       const extension = matches?.[1] || "jpg";
 
       const tempDir = path.join(process.cwd(), "temp");
@@ -517,7 +550,7 @@ new (class WtsMainService {
                         await this.sendStickerMessage(data.token, destination, messageData);
                         break;
                       default:
-                        await this.sendMessageWTyping(data.token, destination, messageData.metadata.body);
+                        await this.sendMessageWTyping(data.token, destination, messageData.metadata.body as string);
                         break;
                     }
                   } catch (err) {
@@ -630,13 +663,35 @@ new (class WtsMainService {
                   continue;
                 }
 
-                // Verifica se a mensagem é de um contato individual
                 const remoteJid = msg.key.remoteJid || "";
-                if (
-                  remoteJid.endsWith("@g.us") || // grupo
-                  remoteJid.endsWith("@broadcast") || // status
-                  remoteJid === "status@broadcast" // status
-                ) {
+                
+                if (remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast") {
+                  continue;
+                }
+
+                if (remoteJid.includes("@newsletter")) {
+                  const newsletterData = await whatsapp.newsletterMetadata("jid", msg.key.remoteJid);
+
+                  const metadata = newsletterData?.thread_metadata || {};
+
+                  if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
+                    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+
+                    await publishEvent("sessions", QUEUE_KEYS.SEND_MESSAGE_TO_WEBHOOK, {
+                      type: "newsletter",
+                      token: data.token.trim(),
+                      messageData: {
+                        newsletter: metadata,
+                        message: {
+                          id: msg.key.id,
+                          body: text,
+                          type: "newsletter",
+                          timestamp: msg.messageTimestamp,
+                        },
+                      },
+                    });
+                  }
+
                   continue;
                 }
 
@@ -739,7 +794,6 @@ new (class WtsMainService {
       });
 
       const MANAGER_QUEUE = PRODUCER_QUEUES_KEYS.SESSION_MANAGER(data.token);
-
       await pgBoss.createQueue(MANAGER_QUEUE);
 
       await pgBoss.work(MANAGER_QUEUE, async (job: JobData[]) => {
@@ -795,7 +849,6 @@ new (class WtsMainService {
       Sentry.captureException(err);
 
       await this.removeSession(data.token);
-      await publishEvent("sessions", QUEUE_KEYS.SESSION_DISCONNECTED, { token: data.token });
       return;
     }
   }
