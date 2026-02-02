@@ -682,6 +682,10 @@ new (class WtsMainService {
                         group: {
                           id: group.id,
                           name: group.subject,
+                          sent_by: {
+                            name: msg.pushName || "Unknown_Member",
+                            number: msg.key.participantAlt?.split("@")[0] || "Unknown_Number",
+                          },
                         },
                         message: {
                           id: msg.key.id,
