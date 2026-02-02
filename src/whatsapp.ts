@@ -664,8 +664,36 @@ new (class WtsMainService {
                 }
 
                 const remoteJid = msg.key.remoteJid || "";
-                
-                if (remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast") {
+
+                if (remoteJid === "status@broadcast") {
+                  continue;
+                }
+
+                if (remoteJid.endsWith("@g.us")) {
+                  console.log(msg);
+                  const group = await whatsapp.groupMetadata(msg.key.remoteJid);
+
+                  if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
+                    const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
+
+                    await publishEvent("sessions", QUEUE_KEYS.SEND_MESSAGE_TO_WEBHOOK, {
+                      type: "group",
+                      token: data.token.trim(),
+                      messageData: {
+                        group: {
+                          id: group.id,
+                          name: group.subject,
+                        },
+                        message: {
+                          id: msg.key.id,
+                          body: text,
+                          type: "group",
+                          timestamp: msg.messageTimestamp,
+                        },
+                      },
+                    });
+                  }
+
                   continue;
                 }
 
