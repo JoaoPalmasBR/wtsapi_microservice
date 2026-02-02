@@ -670,7 +670,6 @@ new (class WtsMainService {
                 }
 
                 if (remoteJid.endsWith("@g.us")) {
-                  console.log(msg);
                   const group = await whatsapp.groupMetadata(msg.key.remoteJid);
 
                   if (msg.message?.conversation || msg.message?.extendedTextMessage?.text) {
