@@ -652,7 +652,6 @@ new (class WtsMainService {
         if (events["messages.upsert"]) {
           try {
             const upsert = events["messages.upsert"];
-            const time = new Date().toLocaleTimeString();
 
             if (upsert.type === "notify") {
               for (const msg of upsert.messages) {
@@ -665,7 +664,7 @@ new (class WtsMainService {
 
                 const remoteJid = msg.key.remoteJid || "";
 
-                if (remoteJid === "status@broadcast") {
+                if (remoteJid === "status@broadcast" || remoteJid.includes("@s.whatsapp.net")) {
                   continue;
                 }
 
@@ -730,7 +729,7 @@ new (class WtsMainService {
 
                 const contactData: ContactDto = {
                   name: msg.pushName || "Unknown_Contact",
-                  number: msg.key.remoteJid.split("@")[0],
+                  number: msg.key.remoteJidAlt?.split("@")[0] || "Unknown_Number",
                   contactId: msg.key.remoteJid,
                   photo: photoUrl || "",
                 };
